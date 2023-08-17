@@ -47,6 +47,11 @@ version 38: deleting obsolete ones
 version 39: switched to generic funcs for prob etc
 version 40: cleaning func calls
 version 41: change way to include errorfloor
+version 42: cleaned up stuff on unused def's
+NOW ON GIT
+230613: committed to github started
+
+
 
 Can switch between different functions and switch parameters on and off
 
@@ -96,6 +101,7 @@ def GetArgs():
     get the root string  -r
     do generate, dofit, do bayes -g -f -b
     interactive, debug -i -d
+    plot residuals -x
     '''
     parser = ap.ArgumentParser(description='Run Bayesian sky motion inference, data generation and fitting.')
     #    parser.add_argument('integers', metavar='N', type=int, nargs='+',
@@ -863,8 +869,11 @@ ffits = {'skyfprlx':skyfprlx,
 funfile = 'skym_par_'+root
 
 outfile = nttag+'_out'+'.txt'
+#set a different name for runs with no major work
+if opts.skipbayes: outfile = nttag+'_out_nb'+'.txt'
 outp = open(outfile,'w',encoding='ascii',errors='ignore')
 outp.write('Code {} run at {}\n'.format(__file__,str(Time(Time.now()))))
+outp.write('Switches:'+str(opts)+'\n')
 outp.write('This is processing based on input in {}\n'.format(funfile))
 
 thefun = fun_yaml(funfile)
