@@ -1,4 +1,4 @@
-
+#!/usr/bin/env python3
 #Trying to run some Bayesian fit of sky motions
 #version 2, version  that can fit 1, 2, 3 pars
 
@@ -50,6 +50,7 @@ version 41: change way to include errorfloor
 version 42: cleaned up stuff on unused def's
 NOW ON GIT
 230613: committed to github started
+230817: major changes in dealing with cos(dec) following Paul's exploration
 
 
 
@@ -183,7 +184,8 @@ def skyfpbin(t,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,binP=1.,bina=0.,bine=0,binT0=0.,
     orb_i = bini
     orb_omega = binom
     orb_Omega = binbigOm
-    pm_alpha_deg = pmx / 3.6e6 / 365.25 / np.cos(np.deg2rad(y0))    # Converting proper motion from milliarcsec/yr to degree/day
+    #Huib took out the division here, do later
+    pm_alphacosd_deg = pmx / 3.6e6 / 365.25    # Converting proper motion from milliarcsec/yr to degree/day
     pm_delta_deg = pmy / 3.6e6 / 365.25     # Converting proper motion from milliarcsec/yr to degree/day
     orb_a_deg = orb_a / 3.6e6                    # Converting orbit size from milliarcsec to degree
     parallax_deg = pi / 3.6e6              # Converting parallax from milliarcsec to degree
@@ -193,10 +195,13 @@ def skyfpbin(t,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,binP=1.,bina=0.,bine=0,binT0=0.,
     #print('H2:',frac_alpha,frac_delta)
     #Huib this is weird! The original had cosd here...
     #predict_ra = alpha_0 * np.cos(np.radians(delta)) + (pm_alpha_deg * (t - t_0(t))) + frac_alpha * parallax_deg + x_obs
-    tmp_ra =  x0 + (pm_alpha_deg * (tskyf - tskyf0))
+    
     tmp_dec = y0 + (pm_delta_deg * (tskyf - tskyf0))
+    tmp_ra =  x0 + (pm_alphacosd_deg * (tskyf - tskyf0))/np.cos(tmp_dec*np.pi/180)
     frac_alpha, frac_delta = frac_parallax(tskyf, tmp_ra, tmp_dec)
-    predict_ra = tmp_ra + frac_alpha * parallax_deg + x_obs
+    #predict_ra = tmp_ra + frac_alpha * parallax_deg + x_obs
+    #But Paul says you need this to agree with astropy:
+    predict_ra = tmp_ra + (frac_alpha * parallax_deg + x_obs)/np.cos(tmp_dec*np.pi/180)
     predict_dec = tmp_dec + frac_delta * parallax_deg + y_obs
     #print('H3:',predict_ra, predict_dec)
     return predict_ra, predict_dec
@@ -363,17 +368,19 @@ def skyfprlx(t,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,t0=24445.):
     orb_i = 0.
     orb_omega = 0.
     orb_Omega = 0.
-    pm_alpha_deg = pmx / 3.6e6 / 365.25 / np.cos(np.deg2rad(y0))    # Converting proper motion from milliarcsec/yr to degree/day
+    #changed this after discussing with Paul
+    pm_alpha_deg = pmx / 3.6e6 / 365.25     # Converting proper motion from milliarcsec/yr to degree/day
     pm_delta_deg = pmy / 3.6e6 / 365.25     # Converting proper motion from milliarcsec/yr to degree/day
     orb_a_deg = orb_a / 3.6e6                    # Converting orbit size from milliarcsec to degree
     parallax_deg = pi / 3.6e6              # Converting parallax from milliarcsec to degree
     x_obs, y_obs = orbital_motion(tskyf, orb_T_0, orb_P, orb_e, orb_i, orb_omega, orb_Omega, orb_a_deg)
     #Huib this is weird! The original had cosd here...
     #predict_ra = alpha_0 * np.cos(np.radians(delta)) + (pm_alpha_deg * (t - t_0(t))) + frac_alpha * parallax_deg + x_obs
-    tmp_ra =  x0 + (pm_alpha_deg * (tskyf - tskyf0))
+    tmp_ra =  x0 + (pm_alpha_deg * (tskyf - tskyf0)) /np.cos(np.deg2rad(y0))
     tmp_dec = y0 + (pm_delta_deg * (tskyf - tskyf0))
     frac_alpha, frac_delta = frac_parallax(tskyf, tmp_ra, tmp_dec)
-    predict_ra = tmp_ra + frac_alpha * parallax_deg + x_obs
+    #changed after discussing with Paul
+    predict_ra = tmp_ra + (frac_alpha * parallax_deg + x_obs)/ np.cos(np.deg2rad(y0))
     predict_dec = tmp_dec + frac_delta * parallax_deg + y_obs
     #print('H3:',predict_ra, predict_dec)
     return predict_ra, predict_dec
@@ -831,7 +838,8 @@ def timetag():
     nowstr=str(Time(Time.now(),format='fits', out_subfmt='longdate_hms'))
     return nowstr[4:6]+nowstr[7:9]+nowstr[10:12]+'-'+nowstr[13:15]+nowstr[16:18]
 
-load = Loader('/Users/langevelde/Desktop/Skymotion/Pikkys')
+#load = Loader('/Users/langevelde/Desktop/Skymotion/Pikkys')
+load = Loader('Skyfield-data')
 planets = load('de438.bsp')
 
 #------ Main body ---------------------------------------------------------------------------------------
