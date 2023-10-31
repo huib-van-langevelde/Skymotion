@@ -73,7 +73,9 @@ and possibly [ttag]_fig*[type].pdf plots
 User supplied values are in mas, mas/yr, yr, ra, dec in degrees
 errors in mas
 data are in ra, dec degrees on the sky
-dates are in JD
+dates are in JD (but the skyfield are in MJD)
+And t0 is the date of the first obs
+binT0 is in days wrt to t0
 
 Can 'fit' a curve to the data
 And 'model' nuisance paramter. 
@@ -198,12 +200,12 @@ def skyfpbin(t,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,binP=1.,bina=0.,bine=0,binT0=0.,
     
     tmp_dec = y0 + (pm_delta_deg * (tskyf - tskyf0))
     tmp_ra =  x0 + (pm_alphacosd_deg * (tskyf - tskyf0))/np.cos(tmp_dec*np.pi/180)
+    
     frac_alpha, frac_delta = frac_parallax(tskyf, tmp_ra, tmp_dec)
     #predict_ra = tmp_ra + frac_alpha * parallax_deg + x_obs
     #But Paul says you need this to agree with astropy:
     predict_ra = tmp_ra + (frac_alpha * parallax_deg + x_obs)/np.cos(tmp_dec*np.pi/180)
     predict_dec = tmp_dec + frac_delta * parallax_deg + y_obs
-    #print('H3:',predict_ra, predict_dec)
     return predict_ra, predict_dec
         
 def earth_position(t):
@@ -285,7 +287,13 @@ def eccentric_anomaly(t, orb_T_0, orb_P, orb_e):
 
     """
     M = 2 * np.pi * (t - orb_T_0) / orb_P
+    
+    #print('mmmm',M,t,orb_T_0,orb_P) 
+    
     E_obs = M + (orb_e * np.sin(M)) + ((orb_e**2) * np.sin(2 * M)/M)
+    
+
+    
     for solve_iteration in range(10):
         M0 = E_obs - (orb_e * np.sin(E_obs))
         E1 = E_obs + ((M - M0) / (1 - (orb_e * np.cos(E_obs))))
@@ -397,6 +405,8 @@ def genf_erf(**tpar):
         x = x+tpar['erf']*np.random.normal(0.,1.,len(x))/3600e3
     else:
         x,y = usef_fits(**tpar)
+        #print('HIER',x,y)
+
     if debug > 4: print(x[0],'...',x[-1],'|',y[0],'...',y[-1])
 
     return x,y
