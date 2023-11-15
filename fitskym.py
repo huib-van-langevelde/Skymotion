@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-#Trying to run some Bayesian fit of sky motions
-#version 2, version  that can fit 1, 2, 3 pars
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -8,7 +6,6 @@ import matplotlib
 from scipy.optimize import minimize
 import emcee
 import corner
-from IPython.display import display, Math
 import astropy.units as u
 from  astropy.coordinates import SkyCoord, ICRS, GCRS
 from astropy.time import Time
@@ -19,57 +16,26 @@ import skyfield
 from skyfield.api import Loader
 
 '''
-fitskym: Sandbox version for fitting sky motions, parallaxes and binary motions
+Bayesian and Max Likelihood fitter motions on the sky
+Facilitating switching between different functions 
+and switching various fit parameters on and off
 
-version 14: cleaned up plotting in various modes.
-version 15: Try on uher data, added timing info, par startup
-version 16: convert to days as time unit, fixed plots to use dict calls
-version 17: run succesfully on UHer, but some plotting problems remain
-version 18: fix print results
-version 19: write fit and plot residual motion, make plots in relative arcsec
-version 20: put ensemble plot in main plot routine
-version 21: clean up, introduce functions with err floor
-version 22: plot without nuisance par, fixed MAJOR error in random.normal
-version 23: differentiate between fit and model parameters
-version 26: properly derived error floor
-version 27: silenced some output
-version 28: incorporate skyfiled faster parlx
-version 29: cosmetic
-version 30: added 11par model straight from Cyg X team
-version 31: worked on switching parameters to fit on and off through par*yaml
-version 32: need residuals after fitting prlx & pm
-version 33: more plotting clean up
-version 34: making fsel & thefun globals consistently 
-version 35: streamlined (residuals and samples) plotting
-version 36: introduced Gaussian priors
-version 37: check functions
-version 38: deleting obsolete ones
-version 39: switched to generic funcs for prob etc
-version 40: cleaning func calls
-version 41: change way to include errorfloor
-version 42: cleaned up stuff on unused def's
-NOW ON GIT
-230613: committed to github started
-230817: major changes in dealing with cos(dec) following Paul's exploration
-
-
-
-Can switch between different functions and switch parameters on and off
-
-Program runs in 3 stages
+Program runs in 4 stages
 - Generate data
 - Find fit by minimisation of -log likelihood
 - Bayesian posteriors with emcee
+- Plot residuals
 
 Control by external files using yaml
-skym_tru_[root].yaml for generating data
+skym_tru_[root].yaml for generating data or supplying true values
 skym_par_[root].yaml for controling fits and bayes
 skym_data_[root].yaml for data
 
-Produces
-skym_out[ttag].txt
+Produces output
+[ttag]_skym_out.txt
 and possibly [ttag]_fig*[type].pdf plots
 
+Data are in JD and sky coordinates
 User supplied values are in mas, mas/yr, yr, ra, dec in degrees
 errors in mas
 data are in ra, dec degrees on the sky
@@ -79,52 +45,48 @@ binT0 is in days wrt to t0
 
 Can 'fit' a curve to the data
 And 'model' nuisance paramter. 
-So Bayes modelinf may use different functions and parameters
+So Bayes model may use different functions and parameters
 
 TBD and Open ends
-- generalise llh function, can it be done?
-- probability too?
-- cleaner way for units, particularly on errors
 - check reference time is consistently used
 - change ellips definition to use ellipticity
 - check all definitions
 - Try on real data
 - Need a way to estimate initials
 - Commandline mode switching, debug level, output
-
-- work to fit selection of parameters
-
-HUIB: check your np.geometric functions are on radians!!!
-
 '''
 
 def GetArgs():
     '''
     Get the command line arguments to reading the data
     get the root string  -r
-    do generate, dofit, do bayes -g -f -b
-    interactive, debug -i -d
-    plot residuals -x
+    There are 4 stages that can be run independently or chained.
+    Default is to do only bayes, other must be switched explicitly
+    
+    do generate, dofit,plot residuals -g, -f, -x
+    save plots -s
+    debug -db
+    dump traces -d
     '''
     parser = ap.ArgumentParser(description='Run Bayesian sky motion inference, data generation and fitting.')
     #    parser.add_argument('integers', metavar='N', type=int, nargs='+',
     #               help='an integer for the accumulator')
-    parser.add_argument('-ng','--skipgenerate', action = 'store_true',
+    parser.add_argument('-g','--dogenerate', action = 'store_true',
                    help='generate mock data')
-    parser.add_argument('-nf','--skipfit', action = 'store_true',
+    parser.add_argument('-f','--dofit', action = 'store_true',
                    help='fit minimising likelihood')
     parser.add_argument('-nb','--skipbayes', action = 'store_true',
                    help='run bayesian inference')
-    parser.add_argument('-np','--fileplots', action = 'store_true',
+    parser.add_argument('-s','--saveplots', action = 'store_true',
                    help='write plots to file')
     parser.add_argument('-t','--readtruth', action = 'store_true',
                    help='read truth from file')
     parser.add_argument('-x','--residualmotion', action = 'store',
                    choices = ['prlxpm','pm','full'],
                    help='plot residual of various kinds')
-    parser.add_argument('-s','--usesamples', action = 'store_true',
-                   help='use samples for residual plot')                   
-    parser.add_argument('-d','--debuglevel',type=int,default=0)
+    parser.add_argument('-d','--dumpsamples', action = 'store_true',
+                   help='dump samples for residual plot')                   
+    parser.add_argument('-db','--debuglevel',type=int,default=0)
     parser.add_argument('-r','--fileroot',type=str,default='sky5st')
     args = parser.parse_args()
     return args
@@ -175,6 +137,7 @@ def pparlx(t,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,t0=24445.):
         return np.full(len(t),-np.Inf),np.full(len(t),-np.Inf)
 
 def skyfpbin(t,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,binP=1.,bina=0.,bine=0,binT0=0.,binom=0.,binbigOm=0.,bini=0.,t0=24445.):
+    #wrapper around skyfield 
     #developed as rwful_skyf
     if (debug >= 2): print('skyfpbin:',locals())
     tskyf0 = t0 - 2400000.5
@@ -527,19 +490,20 @@ def check_prio(pos,fun):
     if (inbound): print('----- Priors make sense')
     return inbound
 
-def fun_yaml(filesel):
+def openyaml(filesel):
     #load parameters for specific function
     filename = filesel+'.yaml'
-    yhandl = open(filename)
+    
+    try:
+        yhandl = open(filename)
+    except IOError: 
+        print("Error: File does not appear to exist.",filename)
+        exit()
+
     fun = yaml.load(yhandl, Loader=yaml.FullLoader)
     return fun
     
-def truths_yaml(filesel):
-    #load parameters for specific function
-    filename = filesel+'.yaml'
-    yhandl = open(filename)
-    truths = yaml.load(yhandl, Loader=yaml.FullLoader)
-    return truths
+
     
 def gendata(func,truth):
     nps = truth['N']
@@ -818,15 +782,22 @@ def plot_skym(tobs,xobs,yobs,xerr,yerr,fits={},truth={},samples=[],name='fig0dat
     return
 
 def plot_corners(flat_samples,labels,truth={}):
+
     ptruths = {}
     if truth: 
         ptruths = [truth[par] for par in (thefun['tofit']+thefun['tomod'])]
 
+    
     if debug: print('Check',flat_samples.shape, labels, ptruths)
-    if truth:
-        fig = corner.corner(flat_samples, labels=labels, truths=ptruths)
-    else:
-        fig = corner.corner(flat_samples, labels=labels)
+    passtru = None
+    if truth: passtru = ptruths
+    fig = corner.corner(flat_samples, labels=labels, truths=passtru,
+            show_titles=True, label_kwargs=dict(fontsize=8), title_kwargs=dict(fontsize=8) )
+    #print(fig.get_size_inches())
+    plt.rcParams.update({'font.size': 22})
+    fig.set_size_inches(6,7.2)
+    
+    #fig.rc('figure', figsize=(2.0, 1.0))
     if plotInteract:
         plt.show()
     else:
@@ -847,6 +818,55 @@ def steptiming(times,stagetext,init=False,outstr=None):
 def timetag():
     nowstr=str(Time(Time.now(),format='fits', out_subfmt='longdate_hms'))
     return nowstr[4:6]+nowstr[7:9]+nowstr[10:12]+'-'+nowstr[13:15]+nowstr[16:18]
+    
+def check_pars(funfile):
+    '''
+    There are nparfunc parameters for the func
+    There could be 1 errorfloor par
+    There are nparfit for the fit =< nparfunc
+    and possibly nparbay=nparfit or nparfit+1 for Bayes
+    the npar = nparbay
+    '''
+    thefun = openyaml(funfile)
+    #print('Dump:',thefun)
+        
+    tofit2 = []
+    for par in thefun['pars'].keys():
+        if thefun['pars'][par]['dofit']:
+            tofit2.append(par)
+    touse2 = []
+    tomod2 = []
+    for par in thefun['pars'].keys():
+        if (not thefun['pars'][par]['dofit']):
+            if 'domod' in thefun['pars'][par]:
+                if thefun['pars'][par]['domod']:
+                    tomod2.append(par)
+            else:
+                touse2.append(par)
+
+    if 'tofit' in thefun:
+        npar2 = len(thefun['tofit'])+len(tomod2)
+        npar3 = len(thefun['pars'].keys())
+        if (thefun['npar'] != npar2 or 
+            len(thefun['tofit']) != len(tofit2) or
+            len(thefun['tomod']) != len(tomod2) ):
+            print('bayes',thefun['npar'],"=",npar2,' of total',npar3)
+            print('to fit',thefun['tofit'],'=',tofit2)
+            print('used fixed',thefun['touse'],'=',touse2)
+            print('model',thefun['tomod'],'=',tomod2)
+            print("This is inconsistent")
+            exit()
+    else:
+        thefun['npar']=len(tofit2)+len(tomod2)
+        thefun['tofit']=tofit2
+        thefun['touse']=touse2
+        thefun['tomod']=tomod2
+        
+    if 'erfmod' in thefun: 
+        print('erf',thefun['erfmod'])
+    else:
+        print('no erf set')
+    return thefun
 
 #load = Loader('/Users/langevelde/Desktop/Skymotion/Pikkys')
 load = Loader('Skyfield-data')
@@ -861,13 +881,11 @@ opts = GetArgs()
 
 debug = opts.debuglevel
 root = opts.fileroot
-plotInteract = not opts.fileplots
-doGenerate = not opts.skipgenerate
-doFit = not opts.skipfit 
+plotInteract = not opts.saveplots
 doBayes = not  opts.skipbayes
-knowTruth = doGenerate or opts.readtruth
+knowTruth = opts.dogenerate or opts.readtruth
 plotResidual = opts.residualmotion
-useSamples = opts.usesamples
+dumpSamples = opts.dumpsamples
 
 nttag = timetag()+'_'+root
 #nttag = str(Time(Time.now(),format='fits', out_subfmt='longdate_hms'))[4:-7]+'_'+root
@@ -894,11 +912,7 @@ outp.write('Code {} run at {}\n'.format(__file__,str(Time(Time.now()))))
 outp.write('Switches:'+str(opts)+'\n')
 outp.write('This is processing based on input in {}\n'.format(funfile))
 
-thefun = fun_yaml(funfile)
-if 'erfmod' in thefun: 
-    print('erf',thefun['erfmod'])
-else:
-    print('no erf set')
+thefun = check_pars(funfile)
 fsel = thefun['fun']
 npar = thefun['npar']
 
@@ -916,14 +930,14 @@ if knowTruth:
     #can be used for generating data and/or plot truth
     print('---Read truths from:',fsel)
     truthfile = 'skym_tru_'+root
-    truth = truths_yaml(truthfile)
+    truth = openyaml(truthfile)
     errpow = truth['errpow']
     if truth['fun']==fsel:
         report_truth(truth,outp)
     else:
         raise RuntimeError("Inconsistent functions")
 
-if doGenerate:
+if opts.dogenerate:
     #Generate data and dump to file
     steptiming(times,'Generating data',outstr=outp)
     #Generate data set    
@@ -967,7 +981,7 @@ if knowTruth:
 else:
     plot_skym(t,x,y,xerr,yerr)
 
-if doFit:
+if opts.dofit:
     #Do a fit with minimising llh
     steptiming(times,'Initialising minimization',outstr=outp)
     nll = lambda *args: -lft_gen(*args)
@@ -1010,7 +1024,7 @@ if doBayes:
     selargs = (t, x, y, xerr, yerr,upar, t[0])
     #selargs = (t, x, y, xerr, yerr, *[thefun['pars'][x]['ini'] for x in thefun['touse']], t[0])
 
-    if doFit:
+    if opts.dofit:
         pos = [mfit[par] for par in thefun['tofit']]
         for xname in thefun['tomod']:
             pos.append(thefun['pars'][xname]['ini'])
@@ -1018,6 +1032,8 @@ if doBayes:
         pos = pos + 1e-4 * np.random.randn(nwalker, npar)
     else:
         inip = [thefun['pars'][xname]['ini'] for xname in thefun['tofit']]
+        for xname in thefun['tomod']:
+            inip.append(thefun['pars'][xname]['ini'])
         pos = inip + 1e-4 * np.random.randn(nwalker, npar)
 
     check_prio(pos,thefun)
@@ -1077,7 +1093,7 @@ if doBayes:
     outp.write('Inferred parameters:\n')
     outp.write(yaml.dump(tmpout))
 
-    if (useSamples):
+    if (dumpSamples):
         print('---writing out traces')
         tmpout.update({'traces':flat_samples.tolist()})
     #outp.write(yaml.dump(tmpout))
