@@ -906,6 +906,10 @@ ffits = {'skyfprlx':skyfprlx,
          'sky7':skym7}
 
 funfile = 'skym_par_'+root
+datafile = 'skym_data_'+root+'.yaml'
+if opts.dogenerate: datafile = nttag + '_data.yaml'
+fitfile = nttag + '_fits.yaml'
+if not doBayes: fitfile = 'skym_fits_'+root+'.yaml'
 
 outfile = nttag+'_out'+'.txt'
 #set a different name for runs with no major work
@@ -953,7 +957,7 @@ if opts.dogenerate:
     outp.write("\n")
     
     #Write data to file
-    datadump=open('skym_data_'+root+'.yaml',"w")
+    datadump=open(datafile,"w")
     yaml.dump(tmpdata,datadump)
     steptiming(times,'Writing data',outstr=outp)
     
@@ -964,9 +968,8 @@ if True:
     steptiming(times,'Reading data',outstr=outp)
     #Huib read data
 
-    infile = 'skym_data_'+root+'.yaml'
-    datasource = open(infile,"r")
-    print('---Use data in:',infile)
+    datasource = open(datafile,"r")
+    print('---Use data in:',datafile)
     thedata = yaml.load(datasource, Loader=yaml.FullLoader)
     
     t = np.array(thedata['t'])
@@ -1101,13 +1104,12 @@ if doBayes:
         tmpout.update({'traces':flat_samples.tolist()})
     #outp.write(yaml.dump(tmpout))
 
-    fitdump=open('skym_fits_'+root+'.yaml',"w")
+    fitdump=open(fitfile,"w")
     yaml.dump(dict(tmpout),fitdump)
 
         #display(Math(txt))
         
 if plotResidual:
-    fitfile = 'skym_fits_'+root+'.yaml'
     fitsource = open(fitfile,"r")
     print('---Use fits in:',fitfile)
     thefit = yaml.load(fitsource, Loader=yaml.FullLoader)
@@ -1117,7 +1119,7 @@ if plotResidual:
         bfit.update({par:thefit[par]['fit']})
     report_resi(fsel,t,x,y,xerr,yerr,bfit)
     
-    if useSamples:
+    if dumpSamples:
         if knowTruth:
             plot_skym(t,x,y,xerr,yerr,fits=bfit,truth=truth,samples=thefit['traces'],name='fig5subpm',submod=opts.residualmotion,connect=True)
         else:
