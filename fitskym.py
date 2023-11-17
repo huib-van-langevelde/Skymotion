@@ -15,6 +15,9 @@ import time as utime
 import skyfield
 from skyfield.api import Loader
 
+MASpDEG = 3.6e6
+DAYSpYR = 365.24217
+
 '''
 Bayesian and Max Likelihood fitter motions on the sky
 Facilitating switching between different functions 
@@ -150,10 +153,10 @@ def skyfpbin(t,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,binP=1.,bina=0.,bine=0,binT0=0.,
     orb_omega = binom
     orb_Omega = binbigOm
     #Huib took out the division here, do later
-    pm_alphacosd_deg = pmx / 3.6e6 / 365.25    # Converting proper motion from milliarcsec/yr to degree/day
-    pm_delta_deg = pmy / 3.6e6 / 365.25     # Converting proper motion from milliarcsec/yr to degree/day
-    orb_a_deg = orb_a / 3.6e6                    # Converting orbit size from milliarcsec to degree
-    parallax_deg = pi / 3.6e6              # Converting parallax from milliarcsec to degree
+    pm_alphacosd_deg = (pmx / MASpDEG) / DAYSpYR    # Converting proper motion from milliarcsec/yr to degree/day
+    pm_delta_deg = (pmy / MASpDEG) / DAYSpYR    # Converting proper motion from milliarcsec/yr to degree/day
+    orb_a_deg = orb_a / MASpDEG                    # Converting orbit size from milliarcsec to degree
+    parallax_deg = pi / MASpDEG            # Converting parallax from milliarcsec to degree
     x_obs, y_obs = orbital_motion(tskyf, orb_T_0, orb_P, orb_e, orb_i, orb_omega, orb_Omega, orb_a_deg)
     #print('H1:',x_obs,y_obs)
     
@@ -319,9 +322,9 @@ def orbital_motion(t, orb_T_0, orb_P, orb_e, orb_i, orb_omega, orb_Omega, orb_a)
 def skym7(t,x0=0,y0=0,pmx=0,pmy=0,rad=0,per=365.,tno=1,t0=58400.):
     #simple sky model for fast evaluation, basic function
     if debug > 0: print('func skymm',t[0],'...',t[-1],x0,y0,pmx,pmy,rad,per,t0,tno)
-    pht = 2*np.pi*(t - tno-t0)/(per*365.26)
-    y = y0+(rad*np.cos(pht)+(t-t0)*pmy/365.26)/3600e3
-    x = x0+(rad*np.sin(pht)+(t-t0)*pmx/365.26)/3600e3
+    pht = 2*np.pi*(t - tno-t0)/(per*DAYSpYR)
+    y = y0+(rad*np.cos(pht)+(t-t0)*pmy/DAYSpYR)/MASpDEG
+    x = x0+(rad*np.sin(pht)+(t-t0)*pmx/DAYSpYR)/MASpDEG
     if debug > 4: print(x[0],'...',x[-1],'|',y[0],'...',y[-1])
     #if rad <0.:
     #    return np.full(len(t),-np.Inf),np.full(len(t),-np.Inf)
@@ -340,10 +343,10 @@ def skyfprlx(t,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,t0=24445.):
     orb_omega = 0.
     orb_Omega = 0.
     #changed this after discussing with Paul
-    pm_alpha_deg = pmx / 3.6e6 / 365.25     # Converting proper motion from milliarcsec/yr to degree/day
-    pm_delta_deg = pmy / 3.6e6 / 365.25     # Converting proper motion from milliarcsec/yr to degree/day
-    orb_a_deg = orb_a / 3.6e6                    # Converting orbit size from milliarcsec to degree
-    parallax_deg = pi / 3.6e6              # Converting parallax from milliarcsec to degree
+    pm_alpha_deg = (pmx / MASpDEG) / DAYSpYR     # Converting proper motion from milliarcsec/yr to degree/day
+    pm_delta_deg = (pmy / MASpDEG) / DAYSpYR    # Converting proper motion from milliarcsec/yr to degree/day
+    orb_a_deg = orb_a / MASpDEG                    # Converting orbit size from milliarcsec to degree
+    parallax_deg = pi / MASpDEG            # Converting parallax from milliarcsec to degree
     x_obs, y_obs = orbital_motion(tskyf, orb_T_0, orb_P, orb_e, orb_i, orb_omega, orb_Omega, orb_a_deg)
     #Huib this is weird! The original had cosd here...
     #predict_ra = alpha_0 * np.cos(np.radians(delta)) + (pm_alpha_deg * (t - t_0(t))) + frac_alpha * parallax_deg + x_obs
@@ -364,8 +367,8 @@ def genf_erf(**tpar):
         xpar = tpar.copy()
         del xpar['erf']
         x,y = usef_fits(**xpar)
-        y = y+tpar['erf']*np.random.normal(0.,1.,len(y))/3600e3
-        x = x+tpar['erf']*np.random.normal(0.,1.,len(x))/3600e3
+        y = y+tpar['erf']*np.random.normal(0.,1.,len(y))/MASpDEG
+        x = x+tpar['erf']*np.random.normal(0.,1.,len(x))/MASpDEG
     else:
         x,y = usef_fits(**tpar)
         #print('HIER',x,y)
@@ -657,8 +660,8 @@ def plot_skym(tobs,xobs,yobs,xerr,yerr,fits={},truth={},samples=[],name='fig0dat
 
     def estsub(x,y,fits,submod,t,tref) :   
         if submod == 'pm':
-            estpmx = fits['pmx']/(3600e3*365.25)
-            estpmy = fits['pmy']/(3600e3*365.25)
+            estpmx = fits['pmx']/(MASpDEG*DAYSpYR)
+            estpmy = fits['pmy']/(MASpDEG*DAYSpYR)
             #print('voor:',xobs[0],xobs[-1])
             x = x-estpmx*(t-tref)
             #print('na:',xobs[0],xobs[-1])
