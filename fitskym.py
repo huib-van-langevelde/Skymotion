@@ -16,7 +16,8 @@ import skyfield
 from skyfield.api import Loader
 
 MASpDEG = 3.6e6
-DAYSpYR = 365.24217
+#DAYSpYR = 365.24217 #replaced to Julian date definition
+DAYSpYR = 365.25
 
 '''
 Bayesian and Max Likelihood fitter motions on the sky
@@ -88,7 +89,9 @@ def GetArgs():
                    choices = ['prlxpm','pm','full'],
                    help='plot residual of various kinds')
     parser.add_argument('-d','--dumpsamples', action = 'store_true',
-                   help='dump samples for residual plot')                   
+                   help='dump/use samples for residual plot')      
+    parser.add_argument('-c','--cornerdump', action = 'store_true',
+                   help='recreate corner plot from dumped data')                         
     parser.add_argument('-db','--debuglevel',type=int,default=0)
     parser.add_argument('-r','--fileroot',type=str,default='sky5st')
     args = parser.parse_args()
@@ -795,10 +798,12 @@ def plot_corners(flat_samples,labels,truth={}):
     passtru = None
     if truth: passtru = ptruths
     fig = corner.corner(flat_samples, labels=labels, truths=passtru,
-            show_titles=True, label_kwargs=dict(fontsize=8), title_kwargs=dict(fontsize=8) )
+            show_titles=True, label_kwargs=dict(fontsize=6), title_kwargs=dict(fontsize=6) )
     #print(fig.get_size_inches())
-    plt.rcParams.update({'font.size': 22})
-    fig.set_size_inches(6,7.2)
+    #plt.rcParams.update({'font.size': 6})
+    for ax in fig.get_axes():
+        ax.tick_params(axis='both', labelsize=6)
+    fig.set_size_inches(8,9.3)
     
     #fig.rc('figure', figsize=(2.0, 1.0))
     if plotInteract:
@@ -868,7 +873,7 @@ def check_pars(funfile):
     if 'erfmod' in thefun: 
         print('erf',thefun['erfmod'])
     else:
-        print('no erf set')
+        print('----no erf set')
     return thefun
 
 #load = Loader('/Users/langevelde/Desktop/Skymotion/Pikkys')
@@ -889,6 +894,7 @@ doBayes = not  opts.skipbayes
 knowTruth = opts.dogenerate or opts.readtruth
 plotResidual = opts.residualmotion
 dumpSamples = opts.dumpsamples
+cornerDump = opts.cornerdump
 
 nttag = timetag()+'_'+root
 #nttag = str(Time(Time.now(),format='fits', out_subfmt='longdate_hms'))[4:-7]+'_'+root
@@ -908,8 +914,9 @@ ffits = {'skyfprlx':skyfprlx,
 funfile = 'skym_par_'+root
 datafile = 'skym_data_'+root+'.yaml'
 if opts.dogenerate: datafile = nttag + '_data.yaml'
-fitfile = nttag + '_fits.yaml'
-if not doBayes: fitfile = 'skym_fits_'+root+'.yaml'
+fitfile = nttag + '_post.yaml'
+#read-only version has generic name
+if not doBayes: fitfile = 'skym_post_'+root+'.yaml'
 
 outfile = nttag+'_out'+'.txt'
 #set a different name for runs with no major work
@@ -1044,8 +1051,6 @@ if doBayes:
 
     check_prio(pos,thefun)
 
-    #Huib this goes totally wrong, you idiot!
-
     if debug: print('Shape walkers',nwalker, npar, pos.shape)
     if debug: print('Sel arguments B: {}\n'.format(selargs))
     report_init(pos,lprob_gen,selargs,outp)
@@ -1072,19 +1077,6 @@ if doBayes:
     outp.write('discarding {} and thinning by {}\n'.format(ndisc,fthin))
     flat_samples = sampler.get_chain(discard=ndisc, thin=fthin, flat=True)
     outp.write('shape of samples {}\n'.format(flat_samples.shape))
-
-    if knowTruth:
-        plot_corners(flat_samples,thefun['tofit']+thefun['tomod'],truth)
-    else:
-        plot_corners(flat_samples,thefun['tofit']+thefun['tomod'])
-    
-    if knowTruth:
-        plot_skym(t,x,y,xerr,yerr,samples=flat_samples,truth=truth,name='fig4ens')
-        #plot_ensemble(fsel,thefun,t,x,y,xerr,yerr,t[0],(t[-1]-t[0]),flat_samples,truth)
-    else:
-        plot_skym(t,x,y,xerr,yerr,samples=flat_samples,name='fig4ens')
-        #plot_ensemble(fsel,thefun,t,x,y,xerr,yerr,t[0],(t[-1]-t[0]),flat_samples)   
-     
     
     tmpout = {}
     for i,par in enumerate(thefun['tofit']+thefun['tomod']):
@@ -1106,13 +1098,37 @@ if doBayes:
 
     fitdump=open(fitfile,"w")
     yaml.dump(dict(tmpout),fitdump)
+    
+if plotResidual or cornerDump:
+    try:
+        fitsource = open(fitfile,"r")
+    except IOError: 
+        print("Error: File does not appear to exist.",fitfile)
+        exit()
 
-        #display(Math(txt))
-        
-if plotResidual:
-    fitsource = open(fitfile,"r")
     print('---Use fits in:',fitfile)
     thefit = yaml.load(fitsource, Loader=yaml.FullLoader)
+    flat_samples = np.array(thefit['traces'])
+    if not 'traces' in thefit:
+        print('----These fits did not save samples!')
+        dumpSamples = False
+        cornerDump = False
+
+if doBayes or cornerDump:
+    if knowTruth:
+        plot_corners(flat_samples,thefun['tofit']+thefun['tomod'],truth)
+    else:
+        plot_corners(flat_samples,thefun['tofit']+thefun['tomod'])
+    
+    if knowTruth:
+        plot_skym(t,x,y,xerr,yerr,samples=flat_samples,truth=truth,name='fig4ens')
+        #plot_ensemble(fsel,thefun,t,x,y,xerr,yerr,t[0],(t[-1]-t[0]),flat_samples,truth)
+    else:
+        plot_skym(t,x,y,xerr,yerr,samples=flat_samples,name='fig4ens')
+        #plot_ensemble(fsel,thefun,t,x,y,xerr,yerr,t[0],(t[-1]-t[0]),flat_samples)   
+     
+        
+if plotResidual:
 
     bfit = {}
     for par in thefun['tofit']:
