@@ -1091,7 +1091,7 @@ if doBayes:
     outp.write('Inferred parameters:\n')
     outp.write(yaml.dump(tmpout))
 
-    if (dumpSamples):
+    if (dumpSamples or plotResidual):
         print('---writing out traces')
         tmpout.update({'traces':flat_samples.tolist()})
     #outp.write(yaml.dump(tmpout))
@@ -1108,11 +1108,13 @@ if plotResidual or cornerDump:
 
     print('---Use fits in:',fitfile)
     thefit = yaml.load(fitsource, Loader=yaml.FullLoader)
-    flat_samples = np.array(thefit['traces'])
     if not 'traces' in thefit:
         print('----These fits did not save samples!')
         dumpSamples = False
         cornerDump = False
+    else:
+        flat_samples = np.array(thefit['traces'])
+
 
 if doBayes or cornerDump:
     if knowTruth:

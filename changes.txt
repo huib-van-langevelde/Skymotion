@@ -1,0 +1,13 @@
+
+We have working version on main 2023/10/31, but probably needs different handling of X0 and Y0, maybe t0 too.
+
+Let's start with fixing a few obvious things
+
+ -✓- Yaml files should have no redundant info 
+ -✓- corner plots need to be smaller and larger labels
+ -✓- switches should not be negative
+ 
+ - made time scalng changeable through constants
+ - read back samples for corner plots
+ - cleaned up corner plots
+ 
