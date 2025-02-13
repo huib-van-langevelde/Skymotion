@@ -129,15 +129,15 @@ def pparlx(t,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,t0=24445.):
                     pm_ra_cosdec = pmx * u.mas / u.year,
                     pm_dec = pmy * u.mas / u.year);
         #print('Astro:',skyc.obstime,skyc)
-        xpos = [];ypos = []
-        for ti in t:
-        #print(BS,t[i])
-        #pm_and_px(BS,t[i])
-        #pm_and_px(BS,Time(2019.0, format='decimalyear'))
-            pos=pm_and_px(skyc,Time(ti, format='jd'))
-            xpos.append(pos.ra.degree)
-            ypos.append(pos.dec.degree)
-        return np.array(xpos), np.array(ypos)
+# Process all times at once
+        epochs = Time(t, format='jd')
+        pos = pm_and_px_vectorized(skyc, epochs)
+        
+        # Extract positions all at once
+        xpos = pos.ra.degree
+        ypos = pos.dec.degree
+        
+        return xpos, ypos
     except:
         print('Exception on parlx')
         return np.full(len(t),-np.Inf),np.full(len(t),-np.Inf)
@@ -192,7 +192,6 @@ def earth_position(t):
     """
     #print("load")
     earth = planets['earth']
-    ts = load.timescale()
     times = ts.tdb_jd(t+2400000.5)
     earth_pos = earth.at(times).position.au
     return earth_pos
@@ -875,10 +874,17 @@ def check_pars(funfile):
     else:
         print('----no erf set')
     return thefun
-
-#load = Loader('/Users/langevelde/Desktop/Skymotion/Pikkys')
-load = Loader('Skyfield-data')
-planets = load('de438.bsp')
+# Cache for Skyfield data
+_skyfield_cache = {}
+def get_skyfield_data():
+    global _skyfield_cache
+    if not _skyfield_cache:
+        loader = Loader('Skyfield-data')
+        _skyfield_cache['planets'] = loader('de438.bsp')
+        _skyfield_cache['timescale'] = loader.timescale()
+    return _skyfield_cache['planets'], _skyfield_cache['timescale']
+# Initialize Skyfield data
+planets, ts = get_skyfield_data()
 
 #------ Main body ---------------------------------------------------------------------------------------
 # data for generation
@@ -1091,7 +1097,7 @@ if doBayes:
     outp.write('Inferred parameters:\n')
     outp.write(yaml.dump(tmpout))
 
-    if (dumpSamples):
+    if (dumpSamples or plotResidual):
         print('---writing out traces')
         tmpout.update({'traces':flat_samples.tolist()})
     #outp.write(yaml.dump(tmpout))
@@ -1108,11 +1114,13 @@ if plotResidual or cornerDump:
 
     print('---Use fits in:',fitfile)
     thefit = yaml.load(fitsource, Loader=yaml.FullLoader)
-    flat_samples = np.array(thefit['traces'])
     if not 'traces' in thefit:
         print('----These fits did not save samples!')
         dumpSamples = False
         cornerDump = False
+    else:
+        flat_samples = np.array(thefit['traces'])
+
 
 if doBayes or cornerDump:
     if knowTruth:
