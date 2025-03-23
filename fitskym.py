@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+#from corner.arviz_corner import xarray_var_iter
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
@@ -15,9 +16,12 @@ import time as utime
 import skyfield
 from skyfield.api import Loader
 
+C2 = True
 MASpDEG = 3.6e6
 #DAYSpYR = 365.24217 #replaced to Julian date definition
 DAYSpYR = 365.25
+
+Version = '1.95; works in 1,2 star case, but not for error floors'
 
 '''
 Bayesian and Max Likelihood fitter motions on the sky
@@ -35,6 +39,8 @@ skym_tru_[root].yaml for generating data or supplying true values
 skym_par_[root].yaml for controling fits and bayes
 skym_data_[root].yaml for data
 
+can also generate skym_post_root.yaml to store traces
+
 Produces output
 [ttag]_skym_out.txt
 and possibly [ttag]_fig*[type].pdf plots
@@ -50,6 +56,11 @@ binT0 is in days wrt to t0
 Can 'fit' a curve to the data
 And 'model' nuisance paramter. 
 So Bayes model may use different functions and parameters
+
+NOTE: Modelling nuisance parameters is BROKEN
+At this time only one lprob_gen is employed
+ALSO switching fixed parameters is untested.
+
 
 TBD and Open ends
 - check reference time is consistently used
@@ -117,7 +128,7 @@ def pparlx(t,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,t0=24445.):
                 frame = 'icrs',
                 obstime = Time(2016.0, format='decimalyear'),
                 distance = (546.975939730948 * u.mas).to(u.pc, u.parallax()),
-                pm_ra_cosdec =  	-801.551 * u.mas / u.year,
+                pm_ra_cosdec =      -801.551 * u.mas / u.year,
                 pm_dec = 10362.394 * u.mas / u.year);
     '''
 
@@ -142,12 +153,12 @@ def pparlx(t,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,t0=24445.):
         print('Exception on parlx')
         return np.full(len(t),-np.Inf),np.full(len(t),-np.Inf)
 
-def skyfpbin(t,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,binP=1.,bina=0.,bine=0,binT0=0.,binom=0.,binbigOm=0.,bini=0.,t0=24445.):
+def skyfpbin(tobs,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,binP=1.,bina=0.,bine=0,binT0=0.,binom=0.,binbigOm=0.,bini=0.,t0=24445.):
     #wrapper around skyfield 
     #developed as rwful_skyf
     if (debug >= 2): print('skyfpbin:',locals())
     tskyf0 = t0 - 2400000.5
-    tskyf = t - 2400000.5
+    tskyf = tobs[0]['t'] - 2400000.5
     orb_a = bina
     orb_T_0 = binT0 -2400000.5 + t0
     orb_P = binP
@@ -157,8 +168,8 @@ def skyfpbin(t,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,binP=1.,bina=0.,bine=0,binT0=0.,
     orb_Omega = binbigOm
     #Huib took out the division here, do later
     pm_alphacosd_deg = (pmx / MASpDEG) / DAYSpYR    # Converting proper motion from milliarcsec/yr to degree/day
-    pm_delta_deg = (pmy / MASpDEG) / DAYSpYR    # Converting proper motion from milliarcsec/yr to degree/day
-    orb_a_deg = orb_a / MASpDEG                    # Converting orbit size from milliarcsec to degree
+    pm_delta_deg = (pmy / MASpDEG) / DAYSpYR        # Converting proper motion from milliarcsec/yr to degree/day
+    orb_a_deg = orb_a / MASpDEG                     # Converting orbit size from milliarcsec to degree
     parallax_deg = pi / MASpDEG            # Converting parallax from milliarcsec to degree
     x_obs, y_obs = orbital_motion(tskyf, orb_T_0, orb_P, orb_e, orb_i, orb_omega, orb_Omega, orb_a_deg)
     #print('H1:',x_obs,y_obs)
@@ -176,7 +187,58 @@ def skyfpbin(t,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,binP=1.,bina=0.,bine=0,binT0=0.,
     predict_ra = tmp_ra + (frac_alpha * parallax_deg + x_obs)/np.cos(tmp_dec*np.pi/180)
     predict_dec = tmp_dec + frac_delta * parallax_deg + y_obs
     return predict_ra, predict_dec
+    
+def skyfc2(tobs,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,binP=1.,bina=0.,bine=0,binT0=0.,
+        binom=0.,binbigOm=0.,bini=0.,mrat=0.9,t0=24445.):
+    '''
+    This is a version that generates images for both stars
+    the input tobs = list with data for 2 stars,
+    but the return is one list with xi, yi appended
+    '''
+    
+    if (debug >= 2): print('skyfpbin:',locals())
+    tskyf0 = t0 - 2400000.5
+    tskyf = tobs[0]['t'] - 2400000.5
+    tskys= tobs[1]['t'] - 2400000.5
+    orb_a = bina
+    orb_T_0 = binT0 -2400000.5 + t0
+    orb_P = binP
+    orb_e = bine
+    orb_i = bini
+    orb_omega = binom
+    orb_Omega = binbigOm
+    #Huib took out the division here, do later
+    pm_alphacosd_deg = (pmx / MASpDEG) / DAYSpYR    # Converting proper motion from milliarcsec/yr to degree/day
+    pm_delta_deg = (pmy / MASpDEG) / DAYSpYR        # Converting proper motion from milliarcsec/yr to degree/day
+    orb_a_deg = orb_a / MASpDEG                     # Converting orbit size from milliarcsec to degree
+    parallax_deg = pi / MASpDEG                     # Converting parallax from milliarcsec to degree
+    x_obs, y_obs = orbital_motion(tskyf, orb_T_0, orb_P, orb_e, orb_i, orb_omega, orb_Omega, orb_a_deg)
+    #Huib takes a guess this will work
+    xsec_obs, ysec_obs = orbital_motion(tskys, orb_T_0, orb_P, orb_e, orb_i, orb_omega, orb_Omega, -1*mrat*orb_a_deg)
+    #print('H1:',x_obs,y_obs)
+    
+    #print('H2:',frac_alpha,frac_delta)
+    #Huib this is weird! The original had cosd here...
+    #predict_ra = alpha_0 * np.cos(np.radians(delta)) + (pm_alpha_deg * (t - t_0(t))) + frac_alpha * parallax_deg + x_obs
+    
+    tmp_dec = y0 + (pm_delta_deg * (tskyf - tskyf0))
+    tmp_ra =  x0 + (pm_alphacosd_deg * (tskyf - tskyf0))/np.cos(tmp_dec*np.pi/180)
+    tmp_decsec = y0 + (pm_delta_deg * (tskys - tskyf0))
+    tmp_rasec =  x0 + (pm_alphacosd_deg * (tskys - tskyf0))/np.cos(tmp_decsec*np.pi/180)
+    
+    frac_alpha, frac_delta = frac_parallax(tskyf, tmp_ra, tmp_dec)
+    fsec_alpha, fsec_delta = frac_parallax(tskys, tmp_rasec, tmp_decsec)
+    #predict_ra = tmp_ra + frac_alpha * parallax_deg + x_obs
+    #But Paul says you need this to agree with astropy:
+    fin_ra = tmp_ra + (frac_alpha * parallax_deg + x_obs)/np.cos(tmp_dec*np.pi/180)
+    fin_dec = tmp_dec + frac_delta * parallax_deg + y_obs
+    fis_ra = tmp_rasec + (fsec_alpha * parallax_deg + xsec_obs)/np.cos(tmp_decsec*np.pi/180)
+    fis_dec = tmp_decsec + fsec_delta * parallax_deg + ysec_obs
+    
+    return np.concatenate((fin_ra,fis_ra)), np.concatenate((fin_dec,fis_dec))
         
+    
+    
 def earth_position(t):
     """
     From CygX1 collab
@@ -321,8 +383,9 @@ def orbital_motion(t, orb_T_0, orb_P, orb_e, orb_i, orb_omega, orb_Omega, orb_a)
     y_obs = orb_a * (1 - orb_e * np.cos(E_obs)) * ((np.cos(theta_obs + orb_omega_rad) * np.cos(orb_Omega_rad)) - (np.sin(theta_obs + orb_omega_rad) * np.sin(orb_Omega_rad) * np.cos(orb_i_rad)))
     return x_obs, y_obs    
         
-def skym7(t,x0=0,y0=0,pmx=0,pmy=0,rad=0,per=365.,tno=1,t0=58400.):
+def skym7(tobs,x0=0,y0=0,pmx=0,pmy=0,rad=0,per=365.,tno=1,t0=58400.):
     #simple sky model for fast evaluation, basic function
+    t = tobs[0]['t']
     if debug > 0: print('func skymm',t[0],'...',t[-1],x0,y0,pmx,pmy,rad,per,t0,tno)
     pht = 2*np.pi*(t - tno-t0)/(per*DAYSpYR)
     y = y0+(rad*np.cos(pht)+(t-t0)*pmy/DAYSpYR)/MASpDEG
@@ -332,9 +395,10 @@ def skym7(t,x0=0,y0=0,pmx=0,pmy=0,rad=0,per=365.,tno=1,t0=58400.):
     #    return np.full(len(t),-np.Inf),np.full(len(t),-np.Inf)
     return x,y
 
-def skyfprlx(t,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,t0=24445.):
+def skyfprlx(tobs,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,t0=24445.):
     #Wrapper for CygX1 collab methods
     #This is a bit of a shortcut, just setting the orbit parameters to zero values
+    t = tobs[0]['t']
     tskyf0 = t0 - 2400000.5
     tskyf = t - 2400000.5
     orb_a = 0.
@@ -361,26 +425,53 @@ def skyfprlx(t,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,t0=24445.):
     #print('H3:',predict_ra, predict_dec)
     return predict_ra, predict_dec
     
-def genf_erf(**tpar):
-    #As an error floor is the only thing we support in nuisance, this can be generic for now
+def genf_erf(obs,**tpar):
+    '''
+    Wraps the function in usef_fits adding the noise and 
+    makes a  difference between things to fit (least squares) and model (Bayes)
+    As an error floor is the only thing we support in nuisance, this can be generic for now
+    This function changes obs in place
+    '''
+    def c2unpack(obs,x,y):
+        n1=obs[0]['nobs']
+        if len(obs)>1:
+            n2=obs[1]['nobs']
+        for i,star in enumerate(obs):
+            if i==0:
+                star['x']=x[:n1]
+                star['y']=y[:n1]
+            else:
+                star['x']=x[-n2:]
+                star['y']=y[-n2:]
+        return
+    
+    
     if debug > 4: print('func skymef:',tpar)
 
+    #the low level function needs a tobs structure, which is the same
+    #but returns x, y    
     if 'erf' in tpar:
         xpar = tpar.copy()
         del xpar['erf']
-        x,y = usef_fits(**xpar)
-        y = y+tpar['erf']*np.random.normal(0.,1.,len(y))/MASpDEG
-        x = x+tpar['erf']*np.random.normal(0.,1.,len(x))/MASpDEG
+        tobs = obs
+        xj, yj = usef_fits(tobs,**xpar)
+        c2unpack(obs,xj,yj)
+        for star in obs:
+            star['y'] = star['y'] +tpar['erf']*np.random.normal(0.,1.,len(star['y']))/MASpDEG
+            star['x'] = star['x'] +tpar['erf']*np.random.normal(0.,1.,len(star['x']))/MASpDEG
     else:
-        x,y = usef_fits(**tpar)
-        #print('HIER',x,y)
-
-    if debug > 4: print(x[0],'...',x[-1],'|',y[0],'...',y[-1])
-
-    return x,y
+        tobs = obs
+        xj, yj = usef_fits(tobs,**tpar)
+        c2unpack(obs,xj,yj)
+        if debug> 6: print('calling ',usef_fits.__name__)
+    return
 
 def lmd_generf(theta,t,x,y,xerr,yerr,touse,t0=2445.):
+    '''
+    THIS ROUTINE IS NOT USED?
     #simple sky model, log likelihood with error floor model for emcee
+    print('YOU ARE TRYING TO FIND ERROR FLOOR, LIKELY BROKEN')
+    '''
     dpar = dict(zip(thefun['tofit']+thefun['tomod'],theta))
     fpar = dict(zip(thefun['tofit'],theta[0:len(thefun['tofit'])]))
 
@@ -391,17 +482,39 @@ def lmd_generf(theta,t,x,y,xerr,yerr,touse,t0=2445.):
     llh = -0.5*np.sum( (y-ymod)**2/sigy2 + (x-xmod)**2/sigx2 + 2.*np.log(2*np.pi)+np.log(sigy2*sigx2))
     return llh
     
-def lft_gen(theta,t,x,y,xerr,yerr,touse,t0=2445.):
-    #simple sky model, log likelihood pure function for fitting
-    dpar = dict(zip(thefun['tofit'],theta))
-    #upar = dict(zip(thefun['touse'],touse))
-    xmod, ymod = usef_fits(t,**dpar,**upar,t0=t0)
+def lft_gen(theta, obs, touse, t0=2445.):
+    """Calculate log likelihood for model fitting.
+    
+    Args:
+        theta (array-like): Parameter values in order of thefun['tofit']
+        obs (list): List of observation dictionaries
+        touse (dict): Fixed parameters to use
+        t0 (float): Reference time
+            
+    Returns:
+        float: Log likelihood value
+    """
+    # Create parameter dictionary from theta array
+    dpar = dict(zip(thefun['tofit'], theta))
+    xmod, ymod = usef_fits(obs, **dpar, **touse, t0=t0)
+        
+    # Handle single or multiple objects
+    if len(obs) > 1:
+        y = np.concatenate((obs[0]['y'], obs[1]['y']))
+        x = np.concatenate((obs[0]['x'], obs[1]['x']))
+        yerr = np.concatenate((obs[0]['yr'], obs[1]['yr']))
+        xerr = np.concatenate((obs[0]['xr'], obs[1]['xr']))
+    else:
+        y=obs[0]['y']
+        x=obs[0]['x']
+        yerr=obs[0]['yr']
+        xerr=obs[0]['xr']
     llh = -0.5*np.sum(((y-ymod)/(2*yerr))**2 + ((x-xmod)/(2*xerr))**2 +np.log(xerr**2 + yerr**2))
     return llh
     
-def lprob_gen(theta, t, x, y, xerr, yerr,touse,t0=2445. ):
+def lprob_gen(theta, obs ,touse,t0=2445. ):
     lp = vec_prios(theta)
-    llh = lft_gen(theta,t,x,y,xerr,yerr,touse,t0)
+    llh = lft_gen(theta, obs,touse,t0)
     if not np.isfinite(lp):
         return -np.inf
     return lp + llh     
@@ -436,12 +549,12 @@ def report_fit(fit,fsel,outp):
     outp.write("\n")
     return
     
-def report_resi(fsel,t,x,y,xerr,yerr,fits):
+def report_resi(fsel,obs,fits):
     #reports on residuals after fit
-    fpar = {'t':t}
+    fpar = {}
     fpar.update(dict(zip(thefun['tofit'],[fits[key] for key in thefun['tofit']] )))
     fpar.update(dict(zip(thefun['touse'],[thefun['pars'][key]['ini'] for key in thefun['touse']] )))
-    fpar.update({'t0':t[0]})
+    fpar.update({'t0':obs[0]['t'][0]})
     #now update nuisance par with val
     for key in thefun['tofit']:
         if 'nuisa' in thefun['pars'][key]:
@@ -449,13 +562,15 @@ def report_resi(fsel,t,x,y,xerr,yerr,fits):
         
         #trupar = [ttru, *[truth[key] for key in (thefun['tofit']+thefun['touse'])],tobs[0]]
     if debug >5: print('fpar:',fpar)
-    xpred,ypred = usef_fits(**fpar)
+    xpred,ypred = usef_fits(obs,**fpar)
     outp.write('Estimates from residuals:')
-    chix=np.sqrt(np.sum(((x-xpred)/xerr)**2))
-    chiy=np.sqrt(np.sum(((y-ypred)/yerr)**2))
-    rmsres=np.sqrt(np.sum((x-xpred)**2 + (y-ypred)**2)/(2*len(x)))*3600e3
-    outp.write("rms residual: {:.3f} mas\n".format(rmsres))
-    outp.write("chi square (x,y): {:.3f} {:.3f}\n".format(chix,chiy))
+    for i, star in enumerate(obs):
+        chix=np.sqrt(np.sum(((star['x']-seloutobs(i,star['nps'],xpred))/star['xr'])**2))
+        chiy=np.sqrt(np.sum(((star['y']-seloutobs(i,star['nps'],ypred))/star['yr'])**2))
+        rmsres=np.sqrt(np.sum((star['x']-seloutobs(i,star['nps'],xpred))**2 + 
+             (star['y']-seloutobs(i,star['nps'],ypred))**2)/(2*len(star['x'])))*3600e3
+        outp.write("star {}; rms residual: {:.3f} mas\n".format(i,rmsres))
+        outp.write("chi square (x,y): {:.3f} {:.3f}\n".format(chix,chiy))
     
 def report_truth(soln,outp):
     #report on the truth
@@ -508,33 +623,41 @@ def openyaml(filesel):
     fun = yaml.load(yhandl, Loader=yaml.FullLoader)
     return fun
     
-
-    
-def gendata(func,truth):
-    nps = truth['N']
+def gendata(func,truth,Nst):
+    obs = [{'nobs':truth['N']}]
+    if Nst>1: obs.append({'nobs':truth['M']})
     errpow = truth['errpow']
-    t = np.sort(truth['tref']+truth['dtobs'] * np.random.rand(nps))
-    ynoi = errpow * np.random.normal(0.,1.,nps)
-    xnoi = errpow * np.random.normal(0.,1.,nps)
+    obs[0]['t'] = np.sort(truth['tref']+truth['dtobs'] * np.random.rand(truth['N']))
+    #Huib shortcut, second star is ssen for M recent epochs
+    if Nst>1: obs[1]['t'] = obs[0]['t'][-truth['M']:]
+    if debug > 5:
+        print('Adding some times for source B')
+        print(obs[1]['t'])
 
     #The func requires a ref day, which is t[0]
-    largs = [t, *[truth[p] for p in thefun['tofit']], *[thefun['pars'][p]['ini'] for p in thefun['touse']], t[0]]
+    #largs = [t, *[truth[p] for p in thefun['tofit']], *[thefun['pars'][p]['ini'] for p in thefun['touse']], t[0]]
 
-    tpar = {'t':t}
+    tpar = {}
     tpar.update(dict(zip(thefun['tofit'],[truth[key] for key in thefun['tofit']] )))
     tpar.update(dict(zip(thefun['touse'],[truth[key] for key in thefun['touse']] )))
     tpar.update(dict(zip(thefun['tomod'],[truth[key] for key in thefun['tomod']] )))
-    tpar.update({'t0':t[0]})
-    if debug >5: print('tpar:',tpar)
-    x,y = func(**tpar)
+    tpar.update({'t0':obs[0]['t'][0]})
+    if debug > 2: print('tpar:',tpar)
+
+    func(obs,**tpar)  
     
-    y += ynoi/3600e3
-    x += xnoi/3600e3
-    yerr = np.zeros(nps)+errpow/3600e3
-    xerr = np.zeros(nps)+errpow/3600e3
+    if debug > 4: print('Data generated',obs )
+
+    for i in range(Nst):
+        obs[i]['y'] += errpow * np.random.normal(0.,1.,obs[i]['nobs'])/3600e3
+        obs[i]['x'] += errpow * np.random.normal(0.,1.,obs[i]['nobs'])/3600e3
+        obs[i]['xr'] =  np.zeros(obs[i]['nobs'])+errpow/3600e3
+        obs[i]['yr'] =  np.zeros(obs[i]['nobs'])+errpow/3600e3
+ 
     if debug > 3:
-        print('Genertated:',t,x,y,xerr,yerr)
-    return t,x,y,xerr,yerr
+        print('Genertated:',obs)
+ 
+    return obs
     
 def dictdump(funpars):
     outstr = ''
@@ -557,6 +680,14 @@ def dictdump(funpars):
         else:
             outstr += '{} = {}\n'.format(key,val)
     return outstr
+
+def seloutobs(istar,nobs,xboth):
+    #split the output from the model in two stars (or one)
+    if istar==0: return xboth[:nobs]
+    elif istar==1: return xboth[-nobs:]
+    else: print('This many stars cannot be handled')
+    return -1
+
 
 def plot_traces(samples,labels):
     fig, axes = plt.subplots(npar, figsize=(10, 7), sharex=True)
@@ -586,197 +717,302 @@ def plot_traces(samples,labels):
         else:
             plt.savefig(nttag+'_fig2trace.pdf')
             
-def plot_skym(tobs,xobs,yobs,xerr,yerr,fits={},truth={},samples=[],name='fig0data', submod=None, connect=False):
+def plot_skym(obs,fits={},truth={},samples=[],name='fig0data', 
+          submod=None, connect=False):
     '''
-    Plots everything interactively or hardcopy, inputs:
-    - tobs, xobs, yobs, xerr, yerr: the data
-    - fits: parameters of best fit
-    - truth: parameters of a-priori truth
-    - samples: instead of fit, use ensemble of traces
-    - name: create a figure with this root
-    - submod: plot data and fit after removing specific model contributions
-    - connect: connect data points
+    Creates visualization plots for astrometric data and model fits.
     
-    Depends on fsel & thefun in global scope
+    This function generates interactive or static plots showing astrometric positions,
+    model fits, and optionally truth values or MCMC samples. It can also show residuals
+    after removing specific model components.
+
+    Parameters
+    ----------
+    obs : list of dict
+        List of observation dictionaries, one dict for each object being fit.
+        Each dictionary contains:
+        - 't': observation times
+        - 'x': RA coordinates
+        - 'y': Dec coordinates
+        - 'xr': RA uncertainties
+        - 'yr': Dec uncertainties
+        - 'nps': number of points for this object
+    fits : dict, optional
+        Dictionary of best-fit parameters for the model. If provided, will plot
+        the model fit alongside the data.
+    truth : dict, optional
+        Dictionary of true parameter values. If provided, will plot the true
+        model alongside the data.
+    samples : list, optional
+        MCMC samples for plotting parameter uncertainties. If provided, will plot
+        multiple model realizations to show the uncertainty range.
+    name : str, optional
+        Root name for saving the figure (default: 'fig0data')
+    submod : str, optional
+        Type of model component to subtract from data. Options are:
+        - 'pm': subtract proper motion
+        - 'prlxpm': subtract parallax and proper motion
+        - 'full': subtract full model
+    connect : bool, optional
+        If True, connects data points with lines (default: False)
+        
+    Notes
+    -----
+    - The function creates a figure with multiple panels showing different aspects
+      of the astrometric solution
+    - Coordinates are plotted relative to a reference position computed from the
+      mean position of the first object
+    - If multiple objects are present, they are plotted in different colors
+    - Model fits and uncertainties (if provided) are overplotted on the data
     '''
     def dref2kas(ymean):
-        #find ref coord to nearest 100mas
-        neg = False
-        sign = ' '
-        if (ymean < 0.):
-            neg=True
-            sign='-'
-            ymean=abs(ymean)
+        """Convert decimal degrees to DMS format with 100mas precision.
+        Returns (value, string) tuple where string is in format '±DDo MM'SS".mas'
+        """
+        # Handle negative values
+        sign = '-' if ymean < 0 else ' '
+        ymean = abs(ymean)
+        
+        # Extract degrees, arcmin, arcsec, milliarcsec
         ymdeg = int(ymean)
-        ymean = ymean - ymdeg
-        ymmin = int(ymean*60.)
-        ymean = ymean*60 - ymmin
-        ymsec = int(ymean*60.)
-        ymean = ymean*60. - ymsec
-        ymkas = int(ymean*100.)
-        ymean = ymean*100 - ymkas
-        yref = ymdeg+ymmin/60.+ymsec/3600.+ymkas/3600e2
-        if neg: yref*=-1.
-        yrefstr = '{}{}o{}\'{}\".{}'.format(sign,ymdeg,ymmin,ymsec,ymkas)
-        return yref,yrefstr
+        remainder = ymean - ymdeg
+        ymmin = int(remainder * 60)
+        remainder = remainder * 60 - ymmin
+        ymsec = int(remainder * 60)
+        ymkas = int((remainder * 60 - ymsec) * 100)
         
+        # Calculate reference value and format string
+        yref = ymdeg + ymmin/60 + ymsec/3600 + ymkas/3600e2
+        if sign == '-': 
+            yref *= -1
+        
+        yrefstr = f"{sign}{ymdeg}o{ymmin}'{ymsec}\".{ymkas}"
+        return yref, yrefstr
+
     def rref2das(xmean):
-        #find ref coord to nearest 100mas
+        """Convert decimal degrees to HMS format with 100mas precision.
+        Returns (value, string) tuple where string is in format 'HHhMM'SS.d's
+        Note: Input is in degrees but output reference is in hours (divided by 15)
+        """
+        # Convert degrees to hours
         xmean = xmean/15.
-        xmhrs = int(xmean)
-        xmean = xmean - xmhrs
-        xmmin = int(xmean*60.)
-        xmean = xmean*60 - xmmin
-        xmsec = int(xmean*60.)
-        xmean = xmean*60. - xmsec
-        xmdas = int(xmean*10.)
-        xmean = xmean*100 - xmdas
-        xref = 15.*(xmhrs+xmmin/60.+xmsec/3600.+xmdas/3600e1)
-        xrefstr = '{}h{}m{}.{}s'.format(xmhrs,xmmin,xmsec,xmdas)
-        return xref,xrefstr
         
-    def setpar(tgrid,pars,thefun):
-        #set par dictionary for model function
-        par = {'t':tgrid}
+        # Extract hours, minutes, seconds, deciseconds
+        xmhrs = int(xmean)
+        remainder = xmean - xmhrs
+        xmmin = int(remainder * 60)
+        remainder = remainder * 60 - xmmin
+        xmsec = int(remainder * 60)
+        xmdas = int((remainder * 60 - xmsec) * 10)  # Truncate to deciseconds
+        
+        # Calculate reference value (in degrees) and format string
+        xref = 15. * (xmhrs + xmmin/60. + xmsec/3600. + xmdas/36000.)
+        xrefstr = f"{xmhrs:02d}h{xmmin:02d}m{xmsec:02d}.{xmdas:01d}s"
+        return xref, xrefstr
+        
+    def setpar(pars,thefun,thet0):
+        
+        par={}
         par.update(dict(zip(thefun['tofit'],[pars[key] for key in thefun['tofit']] )))
         par.update(dict(zip(thefun['touse'],[thefun['pars'][key]['ini'] for key in thefun['touse']] )))
-        par.update({'t0':tobs[0]})
+        par.update({'t0':thet0})
+        #Huib ugly this is hetting obs from local scope
         #trupar = [ttru, *[pars[key] for key in (thefun['tofit']+thefun['touse'])],tobs[0]]
         if debug >5: print('par:',par)
         for key in thefun['tofit']:
             if 'nuisa' in thefun['pars'][key]:
                 tpar[key]=thefun['pars'][key]['nuisa']
+            
         return par
         
-    def setpari(tgrid,pars,thefun):
+    def setpari(pars,thefun,thet0):
         #set par dictionary for model function
-        par = {'t':tgrid}
+        par = {}
         par.update(dict(zip(thefun['tofit'],[pars[i] for i in range(len(thefun['tofit']))] )))
         par.update(dict(zip(thefun['touse'],[thefun['pars'][key]['ini'] for key in thefun['touse']] )))
-        par.update({'t0':tobs[0]})
+        par.update({'t0':thet0})
         if debug >5: print('par:',par)
         for key in thefun['tofit']:
             if 'nuisa' in thefun['pars'][key]:
                 tpar[key]=thefun['pars'][key]['nuisa']
         return par
 
-    def estsub(x,y,fits,submod,t,tref) :   
+    def estsub(x,y,fits,submod,tobs,t0):
+        #work out various subtraction modes input are x,y coords
+        #returns a new one
         if submod == 'pm':
+            # this needs t concatenated
+            if len(tobs) > 1:
+                t = np.concatenate((tobs[0]['t'],tobs[1]['t']))
+            else:
+                t = obs[0]['t']
             estpmx = fits['pmx']/(MASpDEG*DAYSpYR)
             estpmy = fits['pmy']/(MASpDEG*DAYSpYR)
-            #print('voor:',xobs[0],xobs[-1])
-            x = x-estpmx*(t-tref)
-            #print('na:',xobs[0],xobs[-1])
-            y = y-estpmy*(t-tref)
+            x = x-estpmx*(t-t0)
+            y = y-estpmy*(t-t0)
         elif submod == 'prlxpm':
         #run model for bina = 0
             if ('bina' in fits.keys()):
                 #print('setting bina = 0')
                 fits['bina']= 0.
-            fitpar = setpar(t,fits,thefun)                
-            xmod,ymod = usef_fits(**fitpar)
+            fitpar = setpar(fits,thefun,t0)                
+            xmod,ymod = usef_fits(tobs, **fitpar)
             x -= xmod
             y -= ymod
         elif submod == 'full':
-            fitpar = setpar(t,fits,thefun)                
-            xmod,ymod = usef_fits(**fitpar)
+            fitpar = setpar(fits,thefun,t0)
+            xmod,ymod = usef_fits(tobs, **fitpar)
+            print('lent ',len(xmod),len(x))
             x -= xmod
             y -= ymod
-        return x, y
+        return x,y
+        
+    
 
-    doSample = len(samples)>0   
+    doSample = len(samples)>0
 
+    # Validate input and extract observation data
+    if not obs or not isinstance(obs, list) or not obs[0]:
+        raise ValueError("obs must be a non-empty list containing at least one observation dictionary")
+    
+    try:
+        t0 = obs[0]['t'][0]  # Reference time from first observation
+        
+        # Combine coordinates if we have multiple objects, otherwise use single object data
+        if len(obs) > 1:
+            xobs = np.concatenate((obs[0]['x'], obs[1]['x']))  # Concatenate first two objects
+            yobs = np.concatenate((obs[0]['y'], obs[1]['y']))
+        else:
+            xobs = obs[0]['x']
+            yobs = obs[0]['y']
+    except (KeyError, AttributeError, IndexError) as e:
+        raise ValueError("Invalid observation data format. Each observation must contain 't', 'x', and 'y' arrays") from e
+
+    #print('Sure? ',xobs,yobs,tobs)
     #if submod and (not (fits or doSample)): print('Does not make sense to ')
-
+    ntgrid = 200
     if truth or fits or doSample:
         #we thus need a fine grid of timestamps
-        tgrid=np.linspace(tobs[0]-0.1*(tobs[-1]-tobs[0]),tobs[-1]+0.1*(tobs[-1]-tobs[0]),200)
-    if truth:
-        trupar = setpar(tgrid,truth,thefun)
-        xtru,ytru = usef_fits(**trupar)
-    if fits:
-        fitpar = setpar(tgrid,fits,thefun)
-        xfit,yfit = usef_fits(**fitpar)
-        fitpar['t']=tobs
-        xpred,ypred = usef_fits(**fitpar)
-        
-    if submod:
-        xobs,yobs = estsub(xobs,yobs,fits,submod,tobs,tobs[0])
-        xpred, ypred = estsub(xpred,ypred,fits,submod,tobs,tobs[0])
-        xfit,yfit = estsub(xfit,yfit,fits,submod,tgrid,tobs[0])
-        if truth:
-            xtru,ytru = estsub(xtru,ytru,fits,submod,tgrid,tobs[0])
-        
-    if doSample:
-        inds = np.random.randint(len(samples), size=100)
-        xens = []; yens = []
-        
-        for ind in inds:
-            sample = samples[ind]
-            enspar = setpari(tgrid,samples[ind],thefun)
-            xensi,yensi=usef_fits(**enspar)
-            if (submod):
-                xensi,yensi = estsub(xensi,yensi,enspar,submod,tgrid,tobs[0])        
-            xens.append(xensi)
-            yens.append(yensi)
+        #implicit the 1st star is longest, use these times
+        t_span = obs[0]['t'][-1] - obs[0]['t'][0]
+        tgrid = np.linspace(obs[0]['t'][0] - 0.1*t_span, obs[0]['t'][-1] + 0.1*t_span, ntgrid)
+        tgrobs = [{'t': tgrid}] * 2
 
-    yref,yrefstr = dref2kas((yobs[0]+yobs[-1])/2.)
-    xref,xrefstr = rref2das((xobs[0]+xobs[-1])/2.)
+        if truth:
+            xtru, ytru = usef_fits(tgrobs, **setpar(truth, thefun, t0))
+        
+        if fits:
+            fitpar = setpar(fits, thefun, t0)
+            xfit, yfit = usef_fits(tgrobs, **fitpar)
+            xpred, ypred = usef_fits(obs, **fitpar)
+
+            if submod:  # Apply model component subtraction
+                xobs, yobs = estsub(xobs, yobs, fits, submod, obs, t0)
+                xpred, ypred = estsub(xpred, ypred, fits, submod, obs, t0)
+                xfit, yfit = estsub(xfit, yfit, fits, submod, tgrobs, t0)
+                if truth:
+                    xtru, ytru = estsub(xtru, ytru, fits, submod, tgrobs, t0)
+
+        if doSample:  # Generate ensemble predictions from MCMC samples
+            xens, yens = [], []
+            for ind in np.random.randint(len(samples), size=100):
+                xensi, yensi = usef_fits(tgrobs, **setpari(samples[ind], thefun, t0))
+                if submod:
+                    xensi, yensi = estsub(xensi, yensi, setpari(samples[ind], thefun, t0), submod, tgrid, tobs[0])
+                xens.append(xensi)
+                yens.append(yensi)
+
+    # Calculate reference coordinates for plotting
+    yref, yrefstr = dref2kas((obs[0]['y'][0] + obs[0]['y'][-1])/2.)
+    xref, xrefstr = rref2das((obs[0]['x'][0] + obs[0]['x'][-1])/2.)
     
     if doSample: print('-----Plotting a selection from samples')
     if truth: print('-----Plotting the truth as well')
     if submod: print('-----Plotting residuals after a: {}'.format(submod))
     print('-----Plotting with respect to {},{}'.format(xrefstr,yrefstr))
 
-    font = {'size'   : 8}
+    font = {'size': 8}
     matplotlib.rc('font', **font)
     fig=plt.figure()
     grid = plt.GridSpec(2,5)
+    #1st subplot, biggest plot with trajectory on sky --------------------------------
     ax1 = fig.add_subplot(grid[:2,:3])
     ax1.invert_xaxis()
-    ratio=1/np.cos(np.pi*yobs[0]/180.) # cos(d) for center
+    ratio=1/np.cos(np.pi*obs[0]['y'][0]/180.) # cos(d) for center
     ax1.set_aspect(ratio, 'datalim')
 
-    ax1.errorbar(3600e3*(xobs-xref), 3600e3*(yobs-yref), yerr=yerr*3600e3, xerr=xerr*3600e3, fmt=".k", capsize=0)
-    if connect:
-        ax1.plot(3600e3*(xobs-xref), 3600e3*(yobs-yref), '-k')
-        ax1.plot(3600e3*(xobs-xref)[0], 3600e3*(yobs-yref)[0], 'bo')
-        ax1.plot(3600e3*(xobs-xref)[-1], 3600e3*(yobs-yref)[-1], 'ro')
-    if truth: ax1.plot(3600e3*(xtru-xref),3600e3*(ytru-yref),'r')
-    if fits: ax1.plot(3600e3*(xfit-xref),3600e3*(yfit-yref),'g-')
-    if fits: ax1.plot(3600e3*(xpred-xref),3600e3*(ypred-yref),'go')
-    if doSample:
-        for isamp in range(len(xens)):
-            ax1.plot(3600e3*(xens[isamp]-xref),3600e3*(yens[isamp]-yref), "grey", alpha=0.05)
-
+    osym = ['navy','firebrick']
+    psym = ['.y','.y']
+    colr=['r','b']
+    tcol=['green','orange']
+    fcol=['blue','red']
+    ecol=['lightsteelblue','mistyrose']
+    for i, star in enumerate(obs):
+        ax1.errorbar(3600e3*(seloutobs(i,obs[i]['nps'],xobs)-xref), 
+            3600e3*(seloutobs(i,obs[i]['nps'],yobs)-yref), 
+            yerr=star['yr']*3600e3, xerr=star['xr']*3600e3, fmt='.',color=osym[i], capsize=0)
+        if truth:
+            ax1.plot(3600e3*(seloutobs(i,ntgrid,xtru)-xref),
+                     3600e3*(seloutobs(i,ntgrid,ytru)-yref),tcol[i])
+        if fits: 
+            ax1.plot(3600e3*(seloutobs(i,ntgrid,xfit)-xref),
+                 3600e3*(seloutobs(i,ntgrid,yfit)-yref),fcol[i])
+            ax1.plot(3600e3*(seloutobs(i,star['nps'],xpred)-xref),
+                 3600e3*(seloutobs(i,star['nps'],ypred)-yref),psym[i])
+        if doSample:
+            for isamp in range(len(xens)):
+                ax1.plot(3600e3*(seloutobs(i,ntgrid,xens[isamp])-xref),
+                    3600e3*(seloutobs(i,ntgrid,yens[isamp])-yref), ecol[i], alpha=0.05)
+            
+        if connect:
+            ax1.plot(3600e3*(seloutobs(i,star['nps'],xobs)-xref), 
+                     3600e3*(seloutobs(i,star['nps'],yobs)-yref), '-k')
+            ax1.plot(3600e3*(seloutobs(i,star['nps'],xobs)-xref)[0],
+                     3600e3*(seloutobs(i,star['nps'],yobs)-yref)[0], 'bo')
+            ax1.plot(3600e3*(seloutobs(i,star['nps'],xobs)-xref)[-1],
+                     3600e3*(seloutobs(i,star['nps'],yobs)-yref)[-1], 'ro')
+    
+    
     ax1.set_xlabel("x [mas wrt {}]".format(xrefstr))
     ax1.set_ylabel("y [mas wrt {}]".format(yrefstr))
 
+    #2nd plot, right top RA versus time--------------------------------------------
     ax2 = fig.add_subplot(grid[0,3:])
-    ax2.errorbar(tobs,3600e3*(xobs-xref),yerr=xerr,fmt=".k")
-
-    if truth: ax2.plot(tgrid,3600e3*(xtru-xref),'r')
-    if fits: ax2.plot(tgrid,3600e3*(xfit-xref),'g-')
-    if fits: ax2.plot(tobs,3600e3*(xpred-xref),'go')
+    for i, star in enumerate(obs):
+        ax2.errorbar(star['t'],3600e3*(seloutobs(i,obs[i]['nps'],xobs)-xref),yerr=star['xr'],
+            fmt='.',color=osym[i])
+        if truth:
+            ax2.plot(tgrobs[i]['t'],3600e3*(seloutobs(i,ntgrid,xtru)-xref),tcol[i])
+        if fits: 
+            ax2.plot(obs[i]['t'],3600e3*(seloutobs(i,star['nps'],xpred)-xref),psym[i])
+            ax2.plot(tgrobs[i]['t'],3600e3*(seloutobs(i,ntgrid,xfit)-xref),fcol[i])
     if doSample:
-        for isamp in range(len(xens)):
-            ax2.plot(tgrid,3600e3*(xens[isamp]-xref), "grey", alpha=0.05)
+        for i,star in enumerate(obs):
+            for isamp in range(len(xens)):
+                ax2.plot(tgrid,3600e3*(seloutobs(i,ntgrid,xens[isamp])-xref), 
+                    ecol[i], alpha=0.05)
     ax2.yaxis.set_label_position("right")
     ax2.yaxis.tick_right()
-    ax2.set_ylabel("x [deg]")
+    ax2.set_ylabel("x [mas]")
     plt.setp(ax2.get_xticklabels(), visible=False)
     
+    #3nd plot, right bottom Dec versus time-------------------------------------------
     ax3 = fig.add_subplot(grid[1,3:])
-    ax3.errorbar(tobs,3600e3*(yobs-yref),yerr=yerr,fmt=".k")
-    if truth: ax3.plot(tgrid,3600e3*(ytru-yref),'r')
-    if fits: ax3.plot(tgrid,3600e3*(yfit-yref),'g-')
-    if fits: ax3.plot(tobs,3600e3*(ypred-yref),'go')
-    if doSample:
-        for isamp in range(len(xens)):
-            ax3.plot(tgrid,3600e3*(yens[isamp]-yref), "grey", alpha=0.05)
+    for i, star in enumerate(obs):
+        ax3.errorbar(star['t'],3600e3*(seloutobs(i,obs[i]['nps'],yobs)-yref),yerr=star['yr'],
+            fmt='.',color=osym[i])
+        if truth:
+            ax3.plot(tgrobs[i]['t'],3600e3*(seloutobs(i,ntgrid,ytru)-yref),tcol[i])
+        if fits: 
+            ax3.plot(tgrobs[i]['t'],3600e3*(seloutobs(i,ntgrid,yfit)-yref),fcol[i])
+            ax3.plot(obs[i]['t'],3600e3*(seloutobs(i,star['nps'],ypred)-yref),psym[i])
+        if doSample:
+            for isamp in range(len(xens)):
+                 ax3.plot(tgrid,3600e3*(seloutobs(i,ntgrid,yens[isamp])-yref), 
+                     ecol[i], alpha=0.05)
     ax3.tick_params(axis='both', which='major', labelsize=6)
     ax3.set_xlabel("t [mj]")
-    ax3.set_ylabel("y [deg]")
+    ax3.set_ylabel("y [mas]")
     ax3.yaxis.set_label_position("right")
     ax3.yaxis.tick_right()
 
@@ -870,10 +1106,18 @@ def check_pars(funfile):
         thefun['tomod']=tomod2
         
     if 'erfmod' in thefun: 
-        print('erf',thefun['erfmod'])
+        print('----Inserting an error floor erf',thefun['erfmod'])
     else:
         print('----no erf set')
+        
+    if thefun['tomod']:
+        print('-**-Note: modeling nuisance parameter is BROKEN')
+    if thefun['touse']:
+        print('-**-Note: fixing model parameters is UNTESTED')
+        
     return thefun
+    
+    
 # Cache for Skyfield data
 _skyfield_cache = {}
 def get_skyfield_data():
@@ -911,11 +1155,11 @@ print('---Using {} and {}'.format(root,nttag))
 np.random.seed(1543)
 #There are some families of functions. Derived from a model description:
 
-#The first are the simple descriptions, used for displaying the result, root for the others
 ffits = {'skyfprlx':skyfprlx,
-         'skyfpbin':skyfpbin,
-         'pparlx':pparlx,
-         'sky7':skym7}
+        'skyfpbin':skyfpbin,
+        'pparlx':pparlx,
+        'sky7':skym7,
+        'skyfc2':skyfc2}
 
 funfile = 'skym_par_'+root
 datafile = 'skym_data_'+root+'.yaml'
@@ -929,10 +1173,13 @@ outfile = nttag+'_out'+'.txt'
 if opts.skipbayes: outfile = nttag+'_out_nb'+'.txt'
 outp = open(outfile,'w',encoding='ascii',errors='ignore')
 outp.write('Code {} run at {}\n'.format(__file__,str(Time(Time.now()))))
+outp.write('Version: {}\n'.format(Version))
 outp.write('Switches:'+str(opts)+'\n')
 outp.write('This is processing based on input in {}\n'.format(funfile))
 
 thefun = check_pars(funfile)
+Nst = 1
+if 'Nst' in thefun: Nst = thefun['Nst']
 fsel = thefun['fun']
 npar = thefun['npar']
 
@@ -963,15 +1210,27 @@ if opts.dogenerate:
     #Generate data set    
     print('---Generate data for:',fsel)
     #Huibhier dit gaat per ongeluk goed
-    t,x,y,xerr,yerr = gendata(genf_erf,truth)
-    tmpdata = { 't':t.tolist(), 'x':x.tolist(), 'y':y.tolist(), 'xerr':xerr.tolist(), 'yerr':yerr.tolist()}
+    obs = gendata(genf_erf,truth,Nst)
+    #Huib fix writing data
+    tmpdata = []
+    for star in obs:
+        tmpdata.append({'nps':star['nobs'],'t':star['t'].tolist(), 'x':star['x'].tolist(), 'y':star['y'].tolist(), 
+            'xr':star['xr'].tolist(), 'yr':star['yr'].tolist()})
+    if debug > 3:
+        print('Convert for yaml',tmpdata )
+        print('Loooks like',yaml.dump(tmpdata))
+
+    datafile = 'skym_data_'+root+'.yaml'
+    yaml.dump(tmpdata,open(datafile,'w'))
+    #tmpdata = { 't':t.tolist(), 'x':x.tolist(), 'y':y.tolist(), 'xr':xerr.tolist(), 'yerr':yerr.tolist()}
+    print('writing data to yaml')
     outp.write('Using the data:\n')
     outp.write(yaml.dump(tmpdata))
     outp.write("\n")
     
     #Write data to file
-    datadump=open(datafile,"w")
-    yaml.dump(tmpdata,datadump)
+    #datadump=open(datafile,"w")
+    #yaml.dump(obs,datadump)
     steptiming(times,'Writing data',outstr=outp)
     
 #if doFit or doBayes or plotResidual:
@@ -980,37 +1239,44 @@ if True:
     #more work; read-back data
     steptiming(times,'Reading data',outstr=outp)
     #Huib read data
+    if debug > 3: print('Reading this:',datafile)
 
     datasource = open(datafile,"r")
     print('---Use data in:',datafile)
     thedata = yaml.load(datasource, Loader=yaml.FullLoader)
     
-    t = np.array(thedata['t'])
-    x = np.array(thedata['x'])
-    y = np.array(thedata['y'])
-    xerr = np.array(thedata['xerr'])
-    yerr = np.array(thedata['yerr'])
+    if debug > 3: print(thedata)
+
+    obs = []
+    for star in thedata:
+        obs.append({'nps':star['nps'],
+            't':np.array(star['t']),
+            'x':np.array(star['x']),
+            'y':np.array(star['y']),
+            'xr':np.array(star['xr']),
+            'yr':np.array(star['yr'])})
 
     # Maximum likelihood first
     np.random.seed(1203)
     outp.write('Using seed2 {}\n'.format(np.random.random()))
 
-if knowTruth:
-    plot_skym(t,x,y,xerr,yerr,truth=truth)
-else:
-    plot_skym(t,x,y,xerr,yerr)
+    if knowTruth:
+        plot_skym(obs,truth=truth)
+    else:
+        plot_skym(obs)
 
 if opts.dofit:
     #Do a fit with minimising llh
     steptiming(times,'Initialising minimization',outstr=outp)
+    
     nll = lambda *args: -lft_gen(*args)
     if debug > 1: print('Using initials from par specs')
     initial = [thefun['pars'][x]['ini'] for x in thefun['tofit']]
     #initial = np.array(inip + 1.0 * np.random.randn(npar))
 
     upar = dict(zip(thefun['touse'],[thefun['pars'][x]['ini'] for x in thefun['touse']]))
-    selargs = (t, x, y, xerr, yerr,upar, t[0])
-    #selargs = (t, x, y, xerr, yerr, *[thefun['pars'][x]['ini'] for x in thefun['touse']], t[0])
+    selargs = (obs,upar, obs[0]['t'][0])
+    #selargs = (t, x, y, xerr, yerr,upar, t[0])
     if debug > 1: print('Sel arguments F: {}\n'.format(selargs))
     
     print('---Minimise')
@@ -1019,6 +1285,8 @@ if opts.dofit:
 
     steptiming(times,'Starting minimization',outstr=outp)
 
+
+    #Huibhier dit is moeilijk
     soln = minimize(nll, initial, selargs, method = 'Nelder-Mead', options={'maxiter':5000})
     steptiming(times,'Finishing minimization',outstr=outp)
     if (soln.success): 
@@ -1030,9 +1298,9 @@ if opts.dofit:
     report_fit(mfit,fsel,outp)
     outp.write(str(soln)+'\n')
     if knowTruth:
-        plot_skym(t,x,y,xerr,yerr,fits=mfit,truth=truth,name='fig1fit')
+        plot_skym(obs,fits=mfit,truth=truth,name='fig1fit')
     else:
-        plot_skym(t,x,y,xerr,yerr,fits=mfit,name='fig1fit')
+        plot_skym(obs,fits=mfit,name='fig1fit')
 
 if doBayes:
     steptiming(times,'Initialising Bayes',outstr=outp)
@@ -1040,7 +1308,8 @@ if doBayes:
     nlength = thefun['nlength']
     print('---Go Bayes')
     upar = dict(zip(thefun['touse'],[thefun['pars'][x]['ini'] for x in thefun['touse']]))
-    selargs = (t, x, y, xerr, yerr,upar, t[0])
+    selargs = (obs,upar, obs[0]['t'][0])
+    #selargs = (t, x, y, xerr, yerr,upar, t[0])
     #selargs = (t, x, y, xerr, yerr, *[thefun['pars'][x]['ini'] for x in thefun['touse']], t[0])
 
     if opts.dofit:
@@ -1093,7 +1362,7 @@ if doBayes:
         outp.write(txt)
         tmpout.update({par:{'fit':float(mcmc[1]),'minus':float(q[0]),'plus':float(q[1])}})
         #display(Math(txt))y
-    tmpout.update({'tref':float(t[0]),'dtobs':float(t[-1]-t[0])})
+    tmpout.update({'tref':float(obs[0]['t'][0]),'dtobs':float(obs[0]['t'][-1]-obs[0]['t'][0])})
     outp.write('Inferred parameters:\n')
     outp.write(yaml.dump(tmpout))
 
@@ -1129,10 +1398,10 @@ if doBayes or cornerDump:
         plot_corners(flat_samples,thefun['tofit']+thefun['tomod'])
     
     if knowTruth:
-        plot_skym(t,x,y,xerr,yerr,samples=flat_samples,truth=truth,name='fig4ens')
+        plot_skym(obs,samples=flat_samples,truth=truth,name='fig4ens')
         #plot_ensemble(fsel,thefun,t,x,y,xerr,yerr,t[0],(t[-1]-t[0]),flat_samples,truth)
     else:
-        plot_skym(t,x,y,xerr,yerr,samples=flat_samples,name='fig4ens')
+        plot_skym(obs,samples=flat_samples,name='fig4ens')
         #plot_ensemble(fsel,thefun,t,x,y,xerr,yerr,t[0],(t[-1]-t[0]),flat_samples)   
      
         
@@ -1141,18 +1410,21 @@ if plotResidual:
     bfit = {}
     for par in thefun['tofit']:
         bfit.update({par:thefit[par]['fit']})
-    report_resi(fsel,t,x,y,xerr,yerr,bfit)
+    report_resi(fsel,obs,bfit)
     
     if dumpSamples:
         if knowTruth:
-            plot_skym(t,x,y,xerr,yerr,fits=bfit,truth=truth,samples=thefit['traces'],name='fig5subpm',submod=opts.residualmotion,connect=True)
+            plot_skym(obs,fits=bfit,truth=truth,samples=thefit['traces'],
+                name='fig5subpm',submod=opts.residualmotion,connect=True)
         else:
-            plot_skym(t,x,y,xerr,yerr,fits=bfit,samples=thefit['traces'],name='fig5subpm',submod=opts.residualmotion,connect=True)
+            plot_skym(obs,fits=bfit,samples=thefit['traces'],name='fig5subpm',
+                submod=opts.residualmotion,connect=True)
     else:
         if knowTruth:
-            plot_skym(t,x,y,xerr,yerr,fits=bfit,truth=truth,name='fig5subpm',submod=opts.residualmotion,connect=True)
+            plot_skym(obs,fits=bfit,truth=truth,name='fig5subpm',
+                submod=opts.residualmotion,connect=True)
         else:
-            plot_skym(t,x,y,xerr,yerr,fits=bfit,name='fig5subpm',submod=opts.residualmotion,connect=True)
+            plot_skym(obs,fits=bfit,name='fig5subpm',
+                submod=opts.residualmotion,connect=True)
 steptiming(times,'Finishing',outstr=outp)
 outp.close()
-
