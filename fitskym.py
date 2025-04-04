@@ -21,7 +21,10 @@ MASpDEG = 3.6e6
 #DAYSpYR = 365.24217 #replaced to Julian date definition
 DAYSpYR = 365.25
 
-Version = '1.95; works in 1,2 star case, but not for error floors'
+#Version = '1.95; works in 1,2 star case, but not for error floors'
+#Version = '1.96; improve plots for GJ3789 long track'
+#Version = '1.97; fix proper motion'
+Version = '1.98; setting range of obs for plots'
 
 '''
 Bayesian and Max Likelihood fitter motions on the sky
@@ -97,13 +100,17 @@ def GetArgs():
     parser.add_argument('-t','--readtruth', action = 'store_true',
                    help='read truth from file')
     parser.add_argument('-x','--residualmotion', action = 'store',
-                   choices = ['prlxpm','pm','full'],
+                   choices = ['prlxpm','pm','full','none'],
                    help='plot residual of various kinds')
     parser.add_argument('-d','--dumpsamples', action = 'store_true',
                    help='dump/use samples for residual plot')      
     parser.add_argument('-c','--cornerdump', action = 'store_true',
                    help='recreate corner plot from dumped data')                         
     parser.add_argument('-db','--debuglevel',type=int,default=0)
+    parser.add_argument('-i','--ini_p',type=int,default=0,
+                    help='first point for plotting (0 based)')
+    parser.add_argument('-l','--last_p',type=int,default=-1,
+                    help='last point for plotting (can be -1)')
     parser.add_argument('-r','--fileroot',type=str,default='sky5st')
     args = parser.parse_args()
     return args
@@ -718,7 +725,7 @@ def plot_traces(samples,labels):
             plt.savefig(nttag+'_fig2trace.pdf')
             
 def plot_skym(obs,fits={},truth={},samples=[],name='fig0data', 
-          submod=None, connect=False):
+          submod=None, plotc={}):
     '''
     Creates visualization plots for astrometric data and model fits.
     
@@ -753,8 +760,9 @@ def plot_skym(obs,fits={},truth={},samples=[],name='fig0data',
         - 'pm': subtract proper motion
         - 'prlxpm': subtract parallax and proper motion
         - 'full': subtract full model
-    connect : bool, optional
-        If True, connects data points with lines (default: False)
+        - 'initial and last point'
+    plotc : dict, optional
+        can contain tpini, tplast, connect to control plot
         
     Notes
     -----
@@ -846,7 +854,7 @@ def plot_skym(obs,fits={},truth={},samples=[],name='fig0data',
                 t = np.concatenate((tobs[0]['t'],tobs[1]['t']))
             else:
                 t = obs[0]['t']
-            estpmx = fits['pmx']/(MASpDEG*DAYSpYR)
+            estpmx = (fits['pmx'])/(MASpDEG*DAYSpYR*np.cos(np.deg2rad(fits['y0'])))
             estpmy = fits['pmy']/(MASpDEG*DAYSpYR)
             x = x-estpmx*(t-t0)
             y = y-estpmy*(t-t0)
@@ -862,13 +870,54 @@ def plot_skym(obs,fits={},truth={},samples=[],name='fig0data',
         elif submod == 'full':
             fitpar = setpar(fits,thefun,t0)
             xmod,ymod = usef_fits(tobs, **fitpar)
-            print('lent ',len(xmod),len(x))
+            #print('lent ',len(xmod),len(x))
             x -= xmod
             y -= ymod
+        elif submod == 'none':
+            print('-------happily subtract nothing')
         return x,y
-        
     
+    def plotlimits(obs, xobs, yobs, ini,last,ratio):
+        '''
+        Find the plot limits for a zoomed in plot
+        by finding the points to be included
+        assuming the 2nd star is visible in last few epochs
+        '''
+    
+        if last == -1: last = len(obs[0]['t'])-1
+        if ini < 0 or last > (len(obs[0]['t'])-1):
+            print('WARNING, resetting range')
+            ini = 0
+            last = (len(obs[0]['t'])-1)
 
+        #this has too run on xobs and yobs because these can contain residuals
+        #Assuming the last epochs have 2nd star
+        ini2 = max(0,obs[1]['nps']-(obs[0]['nps']-(obs[0]['nps']-last)))+obs[0]['nps']
+        last2 = min(obs[1]['nps'],obs[1]['nps']-(obs[0]['nps']-last-1))+obs[0]['nps']
+
+        xmax = max(np.concatenate([xobs[ini:last],xobs[ini2:last2]]))
+        xmin = min(np.concatenate([xobs[ini:last],xobs[ini2:last2]]))
+        ymax = max(np.concatenate([yobs[ini:last],yobs[ini2:last2]]))
+        ymin = min(np.concatenate([yobs[ini:last],yobs[ini2:last2]]))
+        dx = xmax-xmin
+        dy = ymax-ymin
+        if dx/dy > ratio:
+            dy = dx/ratio
+        else:
+            dx = dy * ratio
+        xmax += 0.1*dx
+        xmin -= 0.1*dx
+        ymax += 0.1*dy
+        ymin -= 0.1*dy
+        tmin = obs[0]['t'][ini]
+        tmax = obs[0]['t'][last]
+        dt = tmax - tmin
+        tmax += 0.1*dt
+        tmin -= 0.1*dt
+
+        return (xmin,xmax,ymin,ymax,tmin,tmax)
+        
+    #--------starting the main plot body--------
     doSample = len(samples)>0
 
     # Validate input and extract observation data
@@ -888,9 +937,8 @@ def plot_skym(obs,fits={},truth={},samples=[],name='fig0data',
     except (KeyError, AttributeError, IndexError) as e:
         raise ValueError("Invalid observation data format. Each observation must contain 't', 'x', and 'y' arrays") from e
 
-    #print('Sure? ',xobs,yobs,tobs)
-    #if submod and (not (fits or doSample)): print('Does not make sense to ')
-    ntgrid = 200
+    # Evaluate the functions that we need
+    ntgrid = 2000
     if truth or fits or doSample:
         #we thus need a fine grid of timestamps
         #implicit the 1st star is longest, use these times
@@ -937,10 +985,28 @@ def plot_skym(obs,fits={},truth={},samples=[],name='fig0data',
     grid = plt.GridSpec(2,5)
     #1st subplot, biggest plot with trajectory on sky --------------------------------
     ax1 = fig.add_subplot(grid[:2,:3])
-    ax1.invert_xaxis()
-    ratio=1/np.cos(np.pi*obs[0]['y'][0]/180.) # cos(d) for center
-    ax1.set_aspect(ratio, 'datalim')
+    ax2 = fig.add_subplot(grid[0,3:])
+    ax3 = fig.add_subplot(grid[1,3:])
 
+    ratio=1/np.cos(np.pi*obs[0]['y'][0]/180.) # cos(d) for cente
+    # ratio x/y
+    #tpini can either not be set, or set to defaulst
+    if  ('tpini' not in plotc or (plotc['tpini'] == 0 and plotc['tplast'] == -1)):
+        print('Doing the old limits')
+        # this worked
+        ax1.invert_xaxis()
+        ax1.set_aspect(ratio, 'datalim')
+    else:
+        print('-----Setting plot limits because of',plotc)
+        xmin,xmax,ymin,ymax,tmin,tmax = plotlimits(obs,xobs, yobs, plotc['tpini'],plotc['tplast'],ratio)
+
+        ax1.set_xlim(3600e3*(xmax-xref),3600e3*(xmin-xref))
+        ax1.set_ylim(3600e3*(ymin-yref),3600e3*(ymax-yref))
+        ax2.set_xlim(tmin,tmax)
+        ax2.set_ylim(3600e3*(xmin-xref),3600e3*(xmax-xref))
+        ax3.set_xlim(tmin,tmax)
+        ax3.set_ylim(3600e3*(ymin-yref),3600e3*(ymax-yref))
+        
     osym = ['navy','firebrick']
     psym = ['.y','.y']
     colr=['r','b']
@@ -954,7 +1020,8 @@ def plot_skym(obs,fits={},truth={},samples=[],name='fig0data',
         if truth:
             ax1.plot(3600e3*(seloutobs(i,ntgrid,xtru)-xref),
                      3600e3*(seloutobs(i,ntgrid,ytru)-yref),tcol[i])
-        if fits: 
+        if fits and not submod=='full':
+            #no need to plot model when 'full' residuals are just 0 
             ax1.plot(3600e3*(seloutobs(i,ntgrid,xfit)-xref),
                  3600e3*(seloutobs(i,ntgrid,yfit)-yref),fcol[i])
             ax1.plot(3600e3*(seloutobs(i,star['nps'],xpred)-xref),
@@ -964,26 +1031,26 @@ def plot_skym(obs,fits={},truth={},samples=[],name='fig0data',
                 ax1.plot(3600e3*(seloutobs(i,ntgrid,xens[isamp])-xref),
                     3600e3*(seloutobs(i,ntgrid,yens[isamp])-yref), ecol[i], alpha=0.05)
             
-        if connect:
+        if 'connect' in plotc and plotc['connect']:
             ax1.plot(3600e3*(seloutobs(i,star['nps'],xobs)-xref), 
                      3600e3*(seloutobs(i,star['nps'],yobs)-yref), '-k')
+            #circle begin blue, end red
             ax1.plot(3600e3*(seloutobs(i,star['nps'],xobs)-xref)[0],
                      3600e3*(seloutobs(i,star['nps'],yobs)-yref)[0], 'bo')
             ax1.plot(3600e3*(seloutobs(i,star['nps'],xobs)-xref)[-1],
                      3600e3*(seloutobs(i,star['nps'],yobs)-yref)[-1], 'ro')
     
-    
     ax1.set_xlabel("x [mas wrt {}]".format(xrefstr))
     ax1.set_ylabel("y [mas wrt {}]".format(yrefstr))
 
     #2nd plot, right top RA versus time--------------------------------------------
-    ax2 = fig.add_subplot(grid[0,3:])
+
     for i, star in enumerate(obs):
-        ax2.errorbar(star['t'],3600e3*(seloutobs(i,obs[i]['nps'],xobs)-xref),yerr=star['xr'],
+        ax2.errorbar(star['t'],3600e3*(seloutobs(i,obs[i]['nps'],xobs)-xref),yerr=3600e3*star['xr'],
             fmt='.',color=osym[i])
         if truth:
             ax2.plot(tgrobs[i]['t'],3600e3*(seloutobs(i,ntgrid,xtru)-xref),tcol[i])
-        if fits: 
+        if fits and not submod=='full': 
             ax2.plot(obs[i]['t'],3600e3*(seloutobs(i,star['nps'],xpred)-xref),psym[i])
             ax2.plot(tgrobs[i]['t'],3600e3*(seloutobs(i,ntgrid,xfit)-xref),fcol[i])
     if doSample:
@@ -997,13 +1064,12 @@ def plot_skym(obs,fits={},truth={},samples=[],name='fig0data',
     plt.setp(ax2.get_xticklabels(), visible=False)
     
     #3nd plot, right bottom Dec versus time-------------------------------------------
-    ax3 = fig.add_subplot(grid[1,3:])
     for i, star in enumerate(obs):
-        ax3.errorbar(star['t'],3600e3*(seloutobs(i,obs[i]['nps'],yobs)-yref),yerr=star['yr'],
+        ax3.errorbar(star['t'],3600e3*(seloutobs(i,obs[i]['nps'],yobs)-yref),yerr=3600e3*star['yr'],
             fmt='.',color=osym[i])
         if truth:
             ax3.plot(tgrobs[i]['t'],3600e3*(seloutobs(i,ntgrid,ytru)-yref),tcol[i])
-        if fits: 
+        if fits and not submod=='full': 
             ax3.plot(tgrobs[i]['t'],3600e3*(seloutobs(i,ntgrid,yfit)-yref),fcol[i])
             ax3.plot(obs[i]['t'],3600e3*(seloutobs(i,star['nps'],ypred)-yref),psym[i])
         if doSample:
@@ -1028,12 +1094,30 @@ def plot_corners(flat_samples,labels,truth={}):
     if truth: 
         ptruths = [truth[par] for par in (thefun['tofit']+thefun['tomod'])]
 
+    CORNER_KWARGS = dict(
+    #smooth=0.9,
+    label_kwargs=dict(fontsize=4),
+    title_kwargs=dict(fontsize=4),
+    #quantiles=[0.16, 0.5, 0.84],
+    #levels=(1 - np.exp(-0.5), 1 - np.exp(-2), 1 - np.exp(-9 / 2.)),
+    #plot_density=False,
+    plot_datapoints=False,
+    fill_contours=True,
+    show_titles=True,
+    max_n_ticks=3,
+    title_fmt=".2E"
+    )
     
     if debug: print('Check',flat_samples.shape, labels, ptruths)
     passtru = None
     if truth: passtru = ptruths
+    #fig = corner.corner(flat_samples, labels=labels, truths=passtru,
+    #        show_titles=True, label_kwargs=dict(fontsize=6), title_kwargs=dict(fontsize=6) )
+            
     fig = corner.corner(flat_samples, labels=labels, truths=passtru,
-            show_titles=True, label_kwargs=dict(fontsize=6), title_kwargs=dict(fontsize=6) )
+            **CORNER_KWARGS)
+            
+            
     #print(fig.get_size_inches())
     #plt.rcParams.update({'font.size': 6})
     for ax in fig.get_axes():
@@ -1145,6 +1229,10 @@ knowTruth = opts.dogenerate or opts.readtruth
 plotResidual = opts.residualmotion
 dumpSamples = opts.dumpsamples
 cornerDump = opts.cornerdump
+plotc = {
+    'tpini' : opts.ini_p,
+    'tplast' : opts.last_p,
+    'connect' : False }
 
 nttag = timetag()+'_'+root
 #nttag = str(Time(Time.now(),format='fits', out_subfmt='longdate_hms'))[4:-7]+'_'+root
@@ -1261,9 +1349,9 @@ if True:
     outp.write('Using seed2 {}\n'.format(np.random.random()))
 
     if knowTruth:
-        plot_skym(obs,truth=truth)
+        plot_skym(obs,truth=truth,plotc=plotc)
     else:
-        plot_skym(obs)
+        plot_skym(obs,plotc=plotc)
 
 if opts.dofit:
     #Do a fit with minimising llh
@@ -1398,10 +1486,10 @@ if doBayes or cornerDump:
         plot_corners(flat_samples,thefun['tofit']+thefun['tomod'])
     
     if knowTruth:
-        plot_skym(obs,samples=flat_samples,truth=truth,name='fig4ens')
+        plot_skym(obs,samples=flat_samples,truth=truth,name='fig4ens',plotc=plotc)
         #plot_ensemble(fsel,thefun,t,x,y,xerr,yerr,t[0],(t[-1]-t[0]),flat_samples,truth)
     else:
-        plot_skym(obs,samples=flat_samples,name='fig4ens')
+        plot_skym(obs,samples=flat_samples,name='fig4ens',plotc=plotc)
         #plot_ensemble(fsel,thefun,t,x,y,xerr,yerr,t[0],(t[-1]-t[0]),flat_samples)   
      
         
@@ -1415,16 +1503,16 @@ if plotResidual:
     if dumpSamples:
         if knowTruth:
             plot_skym(obs,fits=bfit,truth=truth,samples=thefit['traces'],
-                name='fig5subpm',submod=opts.residualmotion,connect=True)
+                name='fig5subpm',submod=opts.residualmotion,plotc=plotc)
         else:
             plot_skym(obs,fits=bfit,samples=thefit['traces'],name='fig5subpm',
-                submod=opts.residualmotion,connect=True)
+                submod=opts.residualmotion,plotc=plotc)
     else:
         if knowTruth:
             plot_skym(obs,fits=bfit,truth=truth,name='fig5subpm',
-                submod=opts.residualmotion,connect=True)
+                submod=opts.residualmotion,plotc=plotc)
         else:
             plot_skym(obs,fits=bfit,name='fig5subpm',
-                submod=opts.residualmotion,connect=True)
+                submod=opts.residualmotion,plotc=plotc)
 steptiming(times,'Finishing',outstr=outp)
 outp.close()
