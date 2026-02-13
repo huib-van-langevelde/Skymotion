@@ -2,6 +2,5 @@
 Skymotion
 =========
 
-Is a *test*
+Cleaning up to support Paul Boven's paper
 
-This is a test, still
