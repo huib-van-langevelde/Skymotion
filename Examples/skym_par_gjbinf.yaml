@@ -1,0 +1,83 @@
+---
+fun: skyfpbin
+npar: 12
+nwalker: 64
+nlength: 8000
+fdisc: 0.5
+pars:
+    pmx:
+      dofit: true
+      ini: -270.2
+      max: -240.0
+      min: -310.0
+    pmy:
+      dofit: true
+      ini: -134.5
+      max: -100.0
+      min: -170.0
+    x0:
+      dofit: true
+      min: 202.93
+      ini: 246.9437
+      max: 246.95
+    y0:
+      dofit: true
+      min: 29.27
+      ini: 29.27652
+      max: 29.29
+    pi:
+      dofit: true
+      ini: 67.
+      min: 30.
+      max: 100.
+    binP:
+      dofit: true
+      ini: 1200.
+      min: 150.
+      max: 8000.
+    bina:
+      dofit: true
+      ini: 50.
+      min: 2.
+      max: 80.
+    binT0:
+      dofit: true
+      ini: 0.
+      min: -200
+      max: 600.
+    bine:
+      dofit: true
+      ini: 0.5
+      min: 0.
+      max: 0.8
+    binom:
+      dofit: true
+      ini: 68.
+      min: 0
+      max: 180.
+    binbigOm:
+      dofit: true
+      ini: 20.
+      min: 0.
+      max: 180.
+    bini: 
+      dofit: True
+      ini: 10.
+      min: 0.
+      max: 90.  
+tofit:
+- x0
+- y0
+- pmx
+- pmy
+- binP
+- pi
+- bina
+- binT0
+- bine
+- binom
+- binbigOm
+- bini
+touse: []
+tomod: []
+
