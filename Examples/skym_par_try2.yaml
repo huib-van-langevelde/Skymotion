@@ -1,0 +1,73 @@
+---
+Nst: 2
+fun: skyfc2
+nwalker: 128
+nlength: 15000
+fdisc: 0.5
+pars:
+    pmx:
+      dofit: true
+      ini: -233.77
+      max: -220.0
+      min: -250.0
+    pmy:
+      dofit: true
+      ini: -143.5
+      max: -130.0
+      min: -150.0
+    x0:
+      dofit: true
+      min: 202.92
+      ini: 202.93
+      max: 202.95
+    y0:
+      dofit: true
+      min: 29.27
+      ini: 29.28
+      max: 29.29
+    pi:
+      dofit: true
+      ini: 55.
+      min: 30.
+      max: 80.
+    binP:
+      dofit: true
+      ini: 1600.
+      min: 1000.
+      max: 4000.
+    bina:
+      dofit: true
+      ini: 70.
+      min: 10.
+      max: 90.
+    binT0:
+      dofit: true
+      ini: 700.
+      min: -700
+      max: 1300.
+    bine:
+      dofit: true
+      ini: 0.7
+      min: 0.
+      max: 0.9
+    binom:
+      dofit: true
+      ini: -30.
+      min: -180.
+      max: 180.
+    binbigOm:
+      dofit: true
+      ini: 235.
+      min: 0.
+      max: 360.
+    bini: 
+      dofit: True
+      ini: 45.
+      min: -90.
+      max: 90. 
+    mrat:
+        dofit: True
+        ini: 0.7
+        min: 0.2
+        max: 1.5
+

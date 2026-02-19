@@ -1,0 +1,20 @@
+---
+fun: skyfc2
+errpow: 0.1
+N: 12
+M: 4
+binP: 1643.00
+binT0: 940.0
+bina: 70.00
+binbigOm: 290.00
+bine: 0.7600
+bini: 50.00
+binom: -38.00
+dtobs: 2500
+pi: 55.00
+pmx: -233.00
+pmy: -143.00
+tref: 2454382.2757
+x0: 202.94
+y0: 29.28
+mrat: 0.9
