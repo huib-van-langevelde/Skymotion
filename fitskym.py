@@ -16,7 +16,7 @@ import time as utime
 import skyfield
 from skyfield.api import Loader
 
-C2 = True
+#C2 = True
 MASpDEG = 3.6e6
 #DAYSpYR = 365.24217 #replaced to Julian date definition
 DAYSpYR = 365.25
@@ -203,7 +203,7 @@ def skyfc2(tobs,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,binP=1.,bina=0.,bine=0,binT0=0.
     but the return is one list with xi, yi appended
     '''
     
-    if (debug >= 2): print('skyfpbin:',locals())
+    if (debug >= 2): print('skyfc2:',locals())
     tskyf0 = t0 - 2400000.5
     tskyf = tobs[0]['t'] - 2400000.5
     tskys= tobs[1]['t'] - 2400000.5
@@ -1345,7 +1345,7 @@ if True:
             'yr':np.array(star['yr'])})
 
     # Maximum likelihood first
-    np.random.seed(1203)
+    np.random.seed(42)
     outp.write('Using seed2 {}\n'.format(np.random.random()))
 
     if knowTruth:
@@ -1445,7 +1445,7 @@ if doBayes:
     for i,par in enumerate(thefun['tofit']+thefun['tomod']):
         mcmc = np.percentile(flat_samples[:, i], [16, 50, 84])
         q = np.diff(mcmc)
-        txt = "\mathrm{{{3}}} = {0:.3f}_{{-{1:.3f}}}^{{{2:.3f}}}\n"
+        txt = "{3} = {0:.3f}_{{-{1:.3f}}}^{{{2:.3f}}}\n"
         txt = txt.format(mcmc[1], q[0], q[1], par)
         outp.write(txt)
         tmpout.update({par:{'fit':float(mcmc[1]),'minus':float(q[0]),'plus':float(q[1])}})
