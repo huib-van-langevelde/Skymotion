@@ -1,5 +1,9 @@
 
-We have working version on main 2023/10/31, but probably needs different handling of X0 and Y0, maybe t0 too.
+
+
+
+We have working version on main 2023/10/31, but probably needs 
+ifferent handling of X0 and Y0, maybe t0 too.
 
 Let's start with fixing a few obvious things
 
@@ -11,3 +15,17 @@ Let's start with fixing a few obvious things
  - read back samples for corner plots
  - cleaned up corner plots
  
+ 
+ Picking up in Feb 2024. 
+ - I think the non-redundant code was implmented
+ 
+ - Did some benchmarking and tried AI improvements
+ 	- Improved run time by factor 6, by storing planet/earth ephemeris outside loops
+ 	- note that M3 macbook is about factor 3 faster
+ 	
+ - Need a simulated data set that converges
+ - Need to write some software/code version in output
+ Did that refv is the new standard
+
+Did a lot of work in early 2025
+- Changed all model interfaces to allow for 2 stars

@@ -31,10 +31,10 @@ Bayesian and Max Likelihood fitter motions on the sky
 Facilitating switching between different functions 
 and switching various fit parameters on and off
 
-Program runs in 4 stages
+Program runs in 4 possible stages
 - Generate data
 - Find fit by minimisation of -log likelihood
-- Bayesian posteriors with emcee
+- Bayesian posteriors with emcee 
 - Plot residuals
 
 Control by external files using yaml
@@ -42,7 +42,7 @@ skym_tru_[root].yaml for generating data or supplying true values
 skym_par_[root].yaml for controling fits and bayes
 skym_data_[root].yaml for data
 
-can also generate skym_post_root.yaml to store traces
+can also generate skym_post_[root].yaml to store traces
 
 Produces output
 [ttag]_skym_out.txt
@@ -160,6 +160,7 @@ def pparlx(t,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,t0=24445.):
         print('Exception on parlx')
         return np.full(len(t),-np.Inf),np.full(len(t),-np.Inf)
 
+#12 par binary fit, 1 star so no mass ratio
 def skyfpbin(tobs,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,binP=1.,bina=0.,bine=0,binT0=0.,binom=0.,binbigOm=0.,bini=0.,t0=24445.):
     #wrapper around skyfield 
     #developed as rwful_skyf
@@ -195,6 +196,7 @@ def skyfpbin(tobs,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,binP=1.,bina=0.,bine=0,binT0=
     predict_dec = tmp_dec + frac_delta * parallax_deg + y_obs
     return predict_ra, predict_dec
     
+#13 par 2 star version
 def skyfc2(tobs,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,binP=1.,bina=0.,bine=0,binT0=0.,
         binom=0.,binbigOm=0.,bini=0.,mrat=0.9,t0=24445.):
     '''
@@ -244,8 +246,6 @@ def skyfc2(tobs,x0=90.,y0=30.,pmx=0.,pmy=0.,pi=1,binP=1.,bina=0.,bine=0,binT0=0.
     
     return np.concatenate((fin_ra,fis_ra)), np.concatenate((fin_dec,fis_dec))
         
-    
-    
 def earth_position(t):
     """
     From CygX1 collab
@@ -1240,7 +1240,7 @@ nttag = timetag()+'_'+root
 print('---Using {} and {}'.format(root,nttag))
 
 #------ Generate some data --------
-np.random.seed(1543)
+np.random.seed(42)
 #There are some families of functions. Derived from a model description:
 
 ffits = {'skyfprlx':skyfprlx,
@@ -1445,7 +1445,7 @@ if doBayes:
     for i,par in enumerate(thefun['tofit']+thefun['tomod']):
         mcmc = np.percentile(flat_samples[:, i], [16, 50, 84])
         q = np.diff(mcmc)
-        txt = "\mathrm{{{3}}} = {0:.3f}_{{-{1:.3f}}}^{{{2:.3f}}}\n"
+        txt = "{3} = {0:.3f}_{{-{1:.3f}}}^{{{2:.3f}}}\n"
         txt = txt.format(mcmc[1], q[0], q[1], par)
         outp.write(txt)
         tmpout.update({par:{'fit':float(mcmc[1]),'minus':float(q[0]),'plus':float(q[1])}})
